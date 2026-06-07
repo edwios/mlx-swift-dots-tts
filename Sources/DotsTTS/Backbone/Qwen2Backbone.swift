@@ -40,6 +40,40 @@ public final class Qwen2Backbone: Module {
     public func logits(_ ids: MLXArray) -> MLXArray {
         model.embedTokens.asLinear(model(ids))
     }
+
+    /// Token embeddings (B, L, hidden) for ids, so callers can inject patch
+    /// embeddings at audio-span positions before the cached forward.
+    public func embed(_ ids: MLXArray) -> MLXArray { model.embedTokens(ids) }
+
+    /// Fresh per-layer KV cache for incremental decode.
+    public func makeCache() -> [KVCache] { (0..<cfg.layers).map { _ in KVCache() } }
+
+    /// Incremental step: feed precomputed embeddings (B, L, hidden) through the
+    /// stack with the KV cache advanced in place. Returns the last hidden state.
+    /// L>1 prefill builds an offset causal mask; L==1 decode uses none.
+    public func step(embeds: MLXArray, cache: [KVCache]) -> MLXArray {
+        model.step(embeds: embeds, cache: cache)
+    }
+}
+
+/// Growing concatenation KV cache (correctness-first; one per layer).
+public final class KVCache {
+    var keys: MLXArray?
+    var values: MLXArray?
+    public private(set) var offset = 0
+    public init() {}
+
+    func update(_ k: MLXArray, _ v: MLXArray) -> (MLXArray, MLXArray) {
+        if let ek = keys, let ev = values {
+            keys = concatenated([ek, k], axis: 2)
+            values = concatenated([ev, v], axis: 2)
+        } else {
+            keys = k
+            values = v
+        }
+        offset += k.dim(2)
+        return (keys!, values!)
+    }
 }
 
 public final class Qwen2Model: Module {
@@ -61,12 +95,23 @@ public final class Qwen2Model: Module {
         for layer in layers { h = layer(h, mask: mask) }
         return norm(h)
     }
+
+    func step(embeds: MLXArray, cache: [KVCache]) -> MLXArray {
+        var h = embeds
+        let L = h.dim(1)
+        let offset = cache.first?.offset ?? 0
+        let mask: MLXArray? = L > 1 ? causalMask(L, dtype: h.dtype, offset: offset) : nil
+        for (layer, c) in zip(layers, cache) { h = layer(h, mask: mask, cache: c) }
+        return norm(h)
+    }
 }
 
-/// Additive (L, L) causal mask: 0 on/below diagonal, -inf above.
-func causalMask(_ L: Int, dtype: DType) -> MLXArray {
-    let r = MLXArray(0..<Int32(L)).reshaped(L, 1)
-    let c = MLXArray(0..<Int32(L)).reshaped(1, L)
+/// Additive causal mask. Without offset: (L, L), 0 on/below diagonal else -inf.
+/// With offset: (L, offset+L), query row i (global pos offset+i) keeps keys
+/// j <= offset+i (the cached prefix plus the causal part of this chunk).
+func causalMask(_ L: Int, dtype: DType, offset: Int = 0) -> MLXArray {
+    let r = (MLXArray(0..<Int32(L)) + Int32(offset)).reshaped(L, 1)
+    let c = MLXArray(0..<Int32(offset + L)).reshaped(1, offset + L)
     let keep = c .<= r
     return MLX.where(keep, MLXArray(0, dtype: dtype), MLXArray(-Float.infinity, dtype: dtype))
 }
@@ -87,6 +132,11 @@ public final class Qwen2Layer: Module {
 
     public func callAsFunction(_ x: MLXArray, mask: MLXArray?) -> MLXArray {
         let h = x + selfAttn(inputLayernorm(x), mask: mask)
+        return h + mlp(postAttentionLayernorm(h))
+    }
+
+    public func callAsFunction(_ x: MLXArray, mask: MLXArray?, cache: KVCache) -> MLXArray {
+        let h = x + selfAttn(inputLayernorm(x), mask: mask, cache: cache)
         return h + mlp(postAttentionLayernorm(h))
     }
 }
@@ -124,6 +174,23 @@ public final class Qwen2Attention: Module {
         k = repeatKV(k, nRep)
         v = repeatKV(v, nRep)
         let out = MLXFast.scaledDotProductAttention(queries: q, keys: k, values: v, scale: scale, mask: mask)
+        return oProj(out.transposed(0, 2, 1, 3).reshaped(B, L, heads * headDim))
+    }
+
+    /// Cached variant: RoPE offset by the cache length, K/V appended in place.
+    public func callAsFunction(_ x: MLXArray, mask: MLXArray?, cache: KVCache) -> MLXArray {
+        let B = x.dim(0), L = x.dim(1)
+        let offset = cache.offset
+        var q = qProj(x).reshaped(B, L, heads, headDim).transposed(0, 2, 1, 3)
+        var k = kProj(x).reshaped(B, L, kvHeads, headDim).transposed(0, 2, 1, 3)
+        var v = vProj(x).reshaped(B, L, kvHeads, headDim).transposed(0, 2, 1, 3)
+        q = rope(q, offset: offset)
+        k = rope(k, offset: offset)
+        (k, v) = cache.update(k, v)
+        let nRep = heads / kvHeads
+        let kr = repeatKV(k, nRep)
+        let vr = repeatKV(v, nRep)
+        let out = MLXFast.scaledDotProductAttention(queries: q, keys: kr, values: vr, scale: scale, mask: mask)
         return oProj(out.transposed(0, 2, 1, 3).reshaped(B, L, heads * headDim))
     }
 }

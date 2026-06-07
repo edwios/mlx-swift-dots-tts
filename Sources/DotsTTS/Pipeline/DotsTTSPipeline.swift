@@ -443,6 +443,12 @@ public final class DotsTTSPipeline: @unchecked Sendable {
 
         guard !outPatches.isEmpty else { return MLXArray.zeros([1, 1, 0]) }
         let latents = concatenated(outPatches, axis: 1).transposed(0, 2, 1)  // (1, 128, T)
+        // Debug-only: dump the real denormalised vocoder input for the precision
+        // bench (a genuine speech latent, unlike the normalised parity fixture).
+        if let dumpPath = ProcessInfo.processInfo.environment["DOTS_DUMP_VOCODER_LATENT"] {
+            eval(latents)
+            try? MLX.save(arrays: ["latent": latents], url: URL(fileURLWithPath: dumpPath))
+        }
         let wav = vocoder(latents)
         eval(wav)
         return wav

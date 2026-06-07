@@ -47,7 +47,18 @@ final class VocoderBenchTests: XCTestCase {
 
         let f32Weights = try MLX.loadArrays(url: URL(fileURLWithPath: weightsPath))
         let ref = try MLX.loadArrays(url: URL(fileURLWithPath: refPath))
-        var latent = ref["latent"]!.asType(.float32)        // (1, 128, T)
+        // Default latent is the parity fixture (a NORMALISED latent -> decodes to
+        // quiet noise, fine for precision drift but not an ear-check). Point
+        // DOTS_BENCH_LATENT at a real denormalised latent (dumped from a render via
+        // DOTS_DUMP_VOCODER_LATENT) for speech output.
+        let realLatentPath = env["DOTS_BENCH_LATENT"]
+        let haveTorchTarget = realLatentPath == nil
+        var latent: MLXArray
+        if let p = realLatentPath {
+            latent = try MLX.loadArrays(url: URL(fileURLWithPath: p))["latent"]!.asType(.float32)
+        } else {
+            latent = ref["latent"]!.asType(.float32)        // (1, 128, T)
+        }
         if tiles > 1 {
             latent = concatenated(Array(repeating: latent, count: tiles), axis: 2)
         }
@@ -100,8 +111,8 @@ final class VocoderBenchTests: XCTestCase {
 
             let outF32 = last.asType(.float32)
             if v.name == "f32" { f32Output = outF32 }
-            // The torch target only matches the un-tiled fixture length.
-            let relTorch = tiles == 1 ? relDiff(outF32, target) : Float.nan
+            // The torch target only matches the un-tiled parity fixture.
+            let relTorch = (haveTorchTarget && tiles == 1) ? relDiff(outF32, target) : Float.nan
             let relF32 = f32Output.map { relDiff(outF32, $0) } ?? 0
             let finite = isFinite(outF32).all().item(Bool.self)
             let note = finite ? "" : "NON-FINITE (NaN/Inf)"

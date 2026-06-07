@@ -41,12 +41,14 @@ public final class DiT: Module {
         super.init()
     }
 
-    /// x: (B, L, inDim); timesteps: (B,); gCond: (B, hidden). Returns (B, L, outDim).
-    public func callAsFunction(_ x: MLXArray, timesteps: MLXArray, gCond: MLXArray?) -> MLXArray {
+    /// x: (B, L, inDim); timesteps: (B,); gCond: (B, hidden); mask: optional additive
+    /// attention bias broadcastable to (B, numHeads, L, L) (0 keep / -inf drop).
+    /// Returns (B, L, outDim).
+    public func callAsFunction(_ x: MLXArray, timesteps: MLXArray, gCond: MLXArray?, mask: MLXArray? = nil) -> MLXArray {
         var c = timeEmbedder(timesteps)
         if let gCond { c = c + gCond }
         var h = inputLayer(x)
-        for blk in blocks { h = blk(h, c) }
+        for blk in blocks { h = blk(h, c, mask) }
         return outputLayer(h, c)
     }
 }
@@ -115,7 +117,7 @@ public final class DiTAttention: Module {
         super.init()
     }
 
-    public func callAsFunction(_ x: MLXArray) -> MLXArray {
+    public func callAsFunction(_ x: MLXArray, _ mask: MLXArray? = nil) -> MLXArray {
         let B = x.dim(0), L = x.dim(1)
         var q = qProj(x).reshaped(B, L, numHeads, headDim).transposed(0, 2, 1, 3)
         var k = kProj(x).reshaped(B, L, numHeads, headDim).transposed(0, 2, 1, 3)
@@ -124,7 +126,7 @@ public final class DiTAttention: Module {
         k = kNorm(k)
         q = rope(q)
         k = rope(k)
-        let out = MLXFast.scaledDotProductAttention(queries: q, keys: k, values: v, scale: scale, mask: nil)
+        let out = MLXFast.scaledDotProductAttention(queries: q, keys: k, values: v, scale: scale, mask: mask)
         return oProj(out.transposed(0, 2, 1, 3).reshaped(B, L, numHeads * headDim))
     }
 }
@@ -160,10 +162,10 @@ public final class DiTBlock: Module {
         super.init()
     }
 
-    public func callAsFunction(_ x: MLXArray, _ c: MLXArray) -> MLXArray {
+    public func callAsFunction(_ x: MLXArray, _ c: MLXArray, _ mask: MLXArray? = nil) -> MLXArray {
         let mod = adaLN[1](adaLN[0](c))
         let p = split(mod, parts: 6, axis: -1)
-        var h = x + p[2].expandedDimensions(axis: 1) * attn(modulate(norm1(x), shift: p[0], scale: p[1]))
+        var h = x + p[2].expandedDimensions(axis: 1) * attn(modulate(norm1(x), shift: p[0], scale: p[1]), mask)
         h = h + p[5].expandedDimensions(axis: 1) * ffn(modulate(norm2(h), shift: p[3], scale: p[4]))
         return h
     }

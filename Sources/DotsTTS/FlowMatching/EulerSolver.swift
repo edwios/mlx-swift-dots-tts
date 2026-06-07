@@ -35,7 +35,7 @@ public final class EulerSolver: Module {
     /// Returns guided velocity (1, patchSize, latentDim).
     private func solverStep(
         t: MLXArray, z: MLXArray,
-        inputSeq: MLXArray, cfgSeq: MLXArray, gCond: MLXArray
+        inputSeq: MLXArray, cfgSeq: MLXArray, gCond: MLXArray, mask: MLXArray?
     ) -> MLXArray {
         let L = inputSeq.dim(1)
         let latentStart = L - patchSize
@@ -48,7 +48,7 @@ public final class EulerSolver: Module {
         let gg = concatenated([gCond, MLXArray.zeros(like: gCond)], axis: 0)  // (2, hidden)
         let tt = broadcast(t.reshaped(1), to: [2])
 
-        var vt = dit(zz, timesteps: tt, gCond: gg)  // (2, L, latentDim)
+        var vt = dit(zz, timesteps: tt, gCond: gg, mask: mask)  // (2, L, latentDim)
         vt = vt[0..., latentStart...]               // (2, patchSize, latentDim)
         let vCond = vt[0 ..< 1]
         let vUnc = vt[1 ..< 2]
@@ -60,16 +60,19 @@ public final class EulerSolver: Module {
     /// Integrate the FM ODE from noise to a clean latent.
     /// - noise:    (1, patchSize, latentDim) initial sample
     /// Returns the integrated latent (1, patchSize, latentDim).
+    /// - mask: optional additive attention bias (0 keep / -inf drop) broadcastable
+    ///   to (2, numHeads, L, L). When nil the DiT uses full attention. The mask is
+    ///   constant across Euler steps, so the caller builds it once.
     public func solve(
         noise: MLXArray, inputSeq: MLXArray, cfgSeq: MLXArray, gCond: MLXArray,
-        numSteps: Int = 10, guidance: Float = 3.0
+        numSteps: Int = 10, guidance: Float = 3.0, mask: MLXArray? = nil
     ) -> MLXArray {
         guidanceScale = guidance
         var z = noise
         let dt = 1.0 / Float(numSteps)
         for n in 0 ..< numSteps {
             let t = MLXArray(Float(n) * dt)
-            z = z + dt * solverStep(t: t, z: z, inputSeq: inputSeq, cfgSeq: cfgSeq, gCond: gCond)
+            z = z + dt * solverStep(t: t, z: z, inputSeq: inputSeq, cfgSeq: cfgSeq, gCond: gCond, mask: mask)
             eval(z)
         }
         return z

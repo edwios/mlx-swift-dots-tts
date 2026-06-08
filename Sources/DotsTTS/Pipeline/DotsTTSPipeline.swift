@@ -21,6 +21,35 @@ import Tokenizers
 /// hooks, but it is meant to be owned by a single serialising actor (Cloney's
 /// `DotsSwiftSynthesiser`), which never calls it concurrently. The debug-inject
 /// properties are test-only and unused on the actor path.
+/// Opt-in per-stage wall-clock profiler (env DOTS_PROFILE_STAGES=1). Accumulates
+/// time per labelled stage across the decode loop so we can see where wall-clock
+/// actually goes (DiT solve vs patch encoder vs backbone vs vocoder). Off by
+/// default; when on it forces an `eval` at each tagged stage to attribute time.
+final class StageProfiler {
+    private var totals: [String: Double] = [:]
+    private var counts: [String: Int] = [:]
+    private var order: [String] = []
+
+    func add(_ label: String, _ seconds: Double) {
+        if totals[label] == nil { order.append(label) }
+        totals[label, default: 0] += seconds
+        counts[label, default: 0] += 1
+    }
+
+    func report() -> String {
+        let grand = totals.values.reduce(0, +)
+        var lines = ["[dots-profile] per-stage wall-clock (tagged total \(String(format: "%.2f", grand))s):"]
+        for label in order.sorted(by: { (totals[$0] ?? 0) > (totals[$1] ?? 0) }) {
+            let t = totals[label] ?? 0
+            let n = counts[label] ?? 0
+            let pct = grand > 0 ? 100 * t / grand : 0
+            lines.append(String(format: "  %-16@ %7.2fs  %5.1f%%  (%d calls, %.1fms/call)",
+                                label as NSString, t, pct, n, n > 0 ? 1000 * t / Double(n) : 0))
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
 public final class DotsTTSPipeline: @unchecked Sendable {
     public struct Params: Sendable {
         public var numSteps = 10
@@ -43,6 +72,8 @@ public final class DotsTTSPipeline: @unchecked Sendable {
     let resampler: Resampler
     let tokenizer: Tokenizer
     let special: DotsSpecialTokens
+    /// Opt-in per-stage profiler (env DOTS_PROFILE_STAGES=1); nil = no extra syncs.
+    let profiler: StageProfiler?
 
     /// Debug-only: when set, decodeNextPatch uses these injected noises (indexed
     /// by decode step) instead of MLXRandom.normal, and each solved patch latent
@@ -157,10 +188,34 @@ public final class DotsTTSPipeline: @unchecked Sendable {
 
         self.tokenizer = tokenizer
         self.special = try DotsSpecialTokens(tokenizer: tokenizer)
+        self.profiler = ProcessInfo.processInfo.environment["DOTS_PROFILE_STAGES"] == "1" ? StageProfiler() : nil
         eval(bb, dit, voc, spk, vae, pe, solver)
     }
 
     struct LatentStats: Codable { let mean: [Float]; let `var`: [Float] }
+
+    /// Tag a stage for profiling. When the profiler is on, force-eval `a` and
+    /// record the elapsed time under `label`. When off (the normal path), return
+    /// `a` untouched - no eval, so the decode loop only syncs where it must (the
+    /// per-patch EOS `.item()` read), instead of eagerly evaluating every stage.
+    @discardableResult
+    private func timedEval(_ label: String, _ a: MLXArray) -> MLXArray {
+        guard let profiler else { return a }
+        let t0 = DispatchTime.now().uptimeNanoseconds
+        eval(a)
+        profiler.add(label, Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e9)
+        return a
+    }
+
+    /// Time a stage that already forces its own eval internally (e.g. the FM
+    /// solver evals each Euler step), so the elapsed call time is the real cost.
+    private func timed<T>(_ label: String, _ body: () -> T) -> T {
+        guard let profiler else { return body() }
+        let t0 = DispatchTime.now().uptimeNanoseconds
+        let r = body()
+        profiler.add(label, Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e9)
+        return r
+    }
 
     // MARK: projection helpers (channels-last x @ W^T + b)
     private func linear(_ x: MLXArray, _ w: MLXArray, _ b: MLXArray) -> MLXArray { matmul(x, w.T) + b }
@@ -356,7 +411,7 @@ public final class DotsTTSPipeline: @unchecked Sendable {
         MLXRandom.seed(params.seed)
         // Python pads the prompt audio before BOTH the speaker encoder and the VAE.
         let pad = padTo(refAudio48k, multiple: patchSize * hopSize)
-        let gCond = debugInjectGCond ?? speakerCond(refAudio48k: pad, scale: params.speakerScale)
+        let gCond = timedEval("speaker", debugInjectGCond ?? speakerCond(refAudio48k: pad, scale: params.speakerScale))
 
         // reference -> sampled latents (unnorm), trim last patch, normalised patches.
         let refLatentsTrim: MLXArray
@@ -368,6 +423,7 @@ public final class DotsTTSPipeline: @unchecked Sendable {
             let pcLocal = refLatents.dim(1) / patchSize
             refLatentsTrim = refLatents[0..., 0 ..< (pcLocal * patchSize)]
         }
+        timedEval("audio_vae", refLatentsTrim)
         let pc = refLatentsTrim.dim(1) / patchSize
         let promptPatches = normalize(refLatentsTrim).reshaped(1, pc, patchSize, latentDim)
 
@@ -376,7 +432,7 @@ public final class DotsTTSPipeline: @unchecked Sendable {
         let schedule = DotsTemplate.generationSchedule(
             promptText: refTranscript, targetText: targetText, maxAudioTokens: maxAudio,
             tokenizer: tokenizer, special: special)
-        let promptEmbed = patchEncoder(refLatentsTrim)             // (1, pc, 1536)
+        let promptEmbed = timedEval("patch_encoder_prefill", patchEncoder(refLatentsTrim))  // (1, pc, 1536)
 
         // span positions (audio_gen_span); prefill consumes the first pc.
         let spans = schedule.enumerated().filter { $0.element == special.audioGenSpan }.map { $0.offset }
@@ -394,7 +450,7 @@ public final class DotsTTSPipeline: @unchecked Sendable {
         let p0 = spans[0]
         let embeds = concatenated([tokEmbeds[0..., 0 ..< p0, 0...], promptEmbed], axis: 1)
         let prefillHidden = backbone.step(embeds: embeds, cache: s.llmCache)  // (1, prefillEnd, 1536)
-        eval(prefillHidden)
+        timedEval("backbone_prefill", prefillHidden)
         if debugInjectNoise != nil { debugFullPrefillHidden = prefillHidden }
         s.llmHidden = prefillHidden[0..., (prefillEnd - 1) ..< prefillEnd, 0...]
 
@@ -416,8 +472,10 @@ public final class DotsTTSPipeline: @unchecked Sendable {
         for step in 0 ..< (totalSpans - pc) {
             let prob = eosProb(s.llmHidden!)
             let stop = prob > params.eosThreshold
-            let z = decodeNextPatch(s, gCond: gCond, p: params)   // (1, patchSize, 128) normalised
-            eval(z)
+            // The FM solver evals each Euler step internally, so z is already
+            // realised on return; `timed` just measures the call. No separate
+            // eval(z) (it would be a redundant no-op on the normal path).
+            let z = timed("dit_solve") { decodeNextPatch(s, gCond: gCond, p: params) }  // (1, patchSize, 128) normalised
             if debugInjectNoise != nil { debugCapturedZ.append(z) }
             // consume: append latent history (normalised), patch-encode, step LLM.
             appendLatent(s, z)
@@ -427,17 +485,19 @@ public final class DotsTTSPipeline: @unchecked Sendable {
                 print("[dec] patch \(step) eos=\(prob) latentRMS=\(rms)")
             }
             appendUnnormLatent(s, unnorm)
-            var llmEmbed = patchEmbedding(s)
+            var llmEmbed = timedEval("patch_encoder", patchEmbedding(s))
             if debugInjectNoise != nil { debugCapturedEmbed.append(llmEmbed) }
             if let inj = debugInjectEmbed, debugCapturedHidden.count < inj.count {
                 llmEmbed = inj[debugCapturedHidden.count]
             }
-            s.llmHidden = backbone.step(embeds: llmEmbed, cache: s.llmCache)
+            s.llmHidden = timedEval("backbone_step", backbone.step(embeds: llmEmbed, cache: s.llmCache))
             if debugInjectNoise != nil { debugCapturedHidden.append(s.llmHidden!) }
             let isLast = (step == totalSpans - pc - 1)
             if !isLast { appendHidden(s, s.llmHidden!) }
             if dropFirst { dropFirst = false } else { outPatches.append(unnorm) }
-            eval(s.llmHidden!)
+            // No eval(s.llmHidden!) here: the next iteration's eosProb(...).item()
+            // forces it, so one sync/patch instead of three. On the final patch it
+            // isn't needed (we break and consume outPatches).
             if stop { break }
         }
 
@@ -449,8 +509,14 @@ public final class DotsTTSPipeline: @unchecked Sendable {
             eval(latents)
             try? MLX.save(arrays: ["latent": latents], url: URL(fileURLWithPath: dumpPath))
         }
+        // timedEval evals + times wav when profiling; otherwise realise it here.
         let wav = vocoder(latents)
-        eval(wav)
+        if let profiler {
+            timedEval("vocoder", wav)
+            print(profiler.report())
+        } else {
+            eval(wav)
+        }
         return wav
     }
 

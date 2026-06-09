@@ -33,6 +33,49 @@ let audio48k = pipeline.generate(
 
 On an M5 Max, the AR backbone decodes ~2x faster in MLX than PyTorch-MPS at fp32 and ~3.8x at int4 (it's memory-bandwidth-bound). The flow-matching DiT - the dominant cost - runs ~2-2.8x faster in MLX fp32 (compute-bound, so quantisation there saves memory, not time). Quantisation shrinks the 8.2GB fp32 core to ~2-3GB.
 
+## Compared to the reference implementation
+
+### Performance
+
+The speedups come from native execution and quantisation, not from changing the decode algorithm:
+
+- **Native MLX/Metal kernels** - no Python or PyTorch-MPS dispatch overhead. ~2x faster backbone decode and ~2-2.8x faster DiT vs PyTorch-MPS at fp32 on an M5 Max (see [Why MLX](#why-mlx)).
+- **Per-component integer quantisation** (int4/int8) - the upstream runtime is float-only (bf16/fp16/fp32). Quantising the bandwidth-bound AR backbone to int4 gives ~3.8x decode throughput and shrinks the 8.2GB fp32 core to ~2-3GB.
+- **MeanFlow few-step path** - when the loaded checkpoint is the NFE=4 distilled DiT, it's auto-detected from the config (no CFG, fewer solver steps), cutting the dominant DiT cost ~2.3x vs the 10-step flow-matching path with no measurable quality loss.
+- **fp16 vocoder/AudioVAE** - half-precision decode of the dominant non-quantisable stage, lower peak RAM with no audible loss.
+- **Fused attention** via MLX's `scaledDotProductAttention`, plus KV-cached incremental decode (one growing cache per layer).
+
+No speculative decoding (in either implementation). It doesn't map cleanly onto dots: the AR head denoises a continuous VAE latent per step via flow-matching rather than sampling from a discrete token vocabulary, so there's no cheap discrete draft to verify in parallel. The win on this architecture is making each step cheaper (quantisation, MeanFlow), not proposing steps speculatively.
+
+What this port deliberately leaves out: streaming, multilingual language tags, in-runtime text normalisation, and any training path.
+
+### Features
+
+This port targets one use case - low-latency, low-memory zero-shot voice cloning on Apple silicon - rather than the full research surface of the [official PyTorch repo](https://github.com/rednote-hilab/dots.tts). It reuses the published model architecture and weights; everything below is about runtime capability, not model quality (the underlying checkpoints are the same).
+
+| Capability                                          | dots.tts (official, PyTorch)                                                                         | This port (MLX / Swift)                                                           |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Hardware                                            | CUDA, Apple MPS, CPU                                                                                 | Apple silicon only (Metal)                                                        |
+| Runtime                                             | Python + PyTorch                                                                                     | Native Swift, no Python                                                           |
+| Continuation cloning (reference audio + transcript) | Yes                                                                                                  | Yes                                                                               |
+| CAM++ x-vector speaker conditioning                 | Yes                                                                                                  | Yes                                                                               |
+| Timbre cloning without a transcript                 | Yes (x-vector-only)                                                                                  | Yes (empty-transcript path)                                                       |
+| Random-voice (no reference)                         | Yes (fine-tuned single-speaker checkpoint)                                                           | No                                                                                |
+| Output sample rate                                  | 48 kHz                                                                                               | 48 kHz                                                                            |
+| Flow-matching checkpoints (Pretrain / SCA)          | Yes                                                                                                  | Yes                                                                               |
+| MeanFlow few-step checkpoint (NFE=4)                | Yes                                                                                                  | Yes (auto-detected from config)                                                   |
+| ODE solvers                                         | euler                                                                                                | euler, midpoint, rk4                                                              |
+| Weight precision                                    | bf16 / fp16 / fp32                                                                                   | fp32 + per-component int4/int8; fp16/bf16 vocoder                                 |
+| Streaming (1T1A interleaved, low-latency)           | Yes                                                                                                  | No                                                                                |
+| Multilingual language tags (24 languages)           | Yes                                                                                                  | No (English-focused; no language-tag input)                                       |
+| Text normalisation                                  | Yes (`--normalize-text`)                                                                             | No (expects pre-normalised text)                                                  |
+| Instruction / emotion template                      | Exposed (`instruction_tts`)\*                                                                        | No                                                                                |
+| Fine-tuning / training                              | Yes (fine-tune entry point)                                                                          | No (inference only)                                                               |
+| Web UI                                              | Gradio app                                                                                           | No (library)                                                                      |
+| Tuneable params                                     | num-steps, guidance, speaker-scale, ode-method, language, seed, max-length, normalize-text, template | numSteps, guidance, speakerScale, odeMethod, eosThreshold, maxOutputPatches, seed |
+
+\* The `instruction_tts` template exists in the reference runtime, but the released soar checkpoint has no instruction/style channel - prompted directives are spoken verbatim rather than acted on - so this port does not surface it.
+
 ## Build
 
 ```

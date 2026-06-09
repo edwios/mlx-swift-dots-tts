@@ -47,7 +47,7 @@ The speedups come from native execution and quantisation, not from changing the 
 
 No speculative decoding (in either implementation). It doesn't map cleanly onto dots: the AR head denoises a continuous VAE latent per step via flow-matching rather than sampling from a discrete token vocabulary, so there's no cheap discrete draft to verify in parallel. The win on this architecture is making each step cheaper (quantisation, MeanFlow), not proposing steps speculatively.
 
-What this port deliberately leaves out: streaming, multilingual language tags, in-runtime text normalisation, and any training path.
+What this port deliberately leaves out: streaming, in-runtime text normalisation, and any training path. Language tags are supported as an optional `[CODE]` prefix, but without the reference's `langcodes`/`lingua` name resolution and auto-detection.
 
 ### Features
 
@@ -67,12 +67,12 @@ This port targets one use case - low-latency, low-memory zero-shot voice cloning
 | ODE solvers                                         | euler                                                                                                | euler, midpoint, rk4                                                              |
 | Weight precision                                    | bf16 / fp16 / fp32                                                                                   | fp32 + per-component int4/int8; fp16/bf16 vocoder                                 |
 | Streaming (1T1A interleaved, low-latency)           | Yes                                                                                                  | No                                                                                |
-| Multilingual language tags (24 languages)           | Yes                                                                                                  | No (English-focused; no language-tag input)                                       |
+| Multilingual language tags (24 languages)           | Yes                                                                                                  | Opt-in `[CODE]` tag; auto-detect is a coarse CJK heuristic (no langcodes/lingua)   |
 | Text normalisation                                  | Yes (`--normalize-text`)                                                                             | No (expects pre-normalised text)                                                  |
 | Instruction / emotion template                      | Exposed (`instruction_tts`)\*                                                                        | No                                                                                |
 | Fine-tuning / training                              | Yes (fine-tune entry point)                                                                          | No (inference only)                                                               |
 | Web UI                                              | Gradio app                                                                                           | No (library)                                                                      |
-| Tuneable params                                     | num-steps, guidance, speaker-scale, ode-method, language, seed, max-length, normalize-text, template | numSteps, guidance, speakerScale, odeMethod, eosThreshold, maxOutputPatches, seed |
+| Tuneable params                                     | num-steps, guidance, speaker-scale, ode-method, language, seed, max-length, normalize-text, template | numSteps, guidance, speakerScale, odeMethod, language, eosThreshold, maxOutputPatches, seed |
 
 \* The `instruction_tts` template exists in the reference runtime, but the released soar checkpoint has no instruction/style channel - prompted directives are spoken verbatim rather than acted on - so this port does not surface it.
 

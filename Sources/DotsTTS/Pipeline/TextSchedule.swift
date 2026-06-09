@@ -32,6 +32,42 @@ public enum DotsTextError: Error {
     case missingSpecialToken(String)
 }
 
+/// Resolves a user-supplied language string to the model-side tag content that
+/// gets wrapped as `[CODE]` and prefixed to the text, mirroring the runtime's
+/// `attach_language_tag` / `normalize_language_code`. Returns nil when no tag
+/// should be attached (the default - upstream's `none`).
+///
+/// This is a lightweight resolver, not the full `langcodes` path: it accepts the
+/// codes/names the app surfaces (plus any bare 2-3 letter ISO code), maps the
+/// Cantonese special case to the runtime's accent tag, and treats `auto_detect`
+/// as a coarse CJK-vs-not heuristic (no `lingua` dependency).
+public enum DotsLanguageTag {
+    /// The bracket content (e.g. "EN", "ZH", "口音:粤语"), or nil for no tag.
+    public static func code(for language: String?, text: String) -> String? {
+        guard let raw = language?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
+        else { return nil }
+        let lower = raw.lowercased()
+        if lower == "none" || lower == "unknown" { return nil }
+        if raw.hasPrefix("口音:") { return raw }
+        if lower == "auto_detect" || lower == "auto" {
+            return DotsTemplate.containsCJK(text) ? "ZH" : "EN"
+        }
+        switch lower {
+        case "en", "english": return "EN"
+        case "zh", "chinese", "mandarin", "zh-cn", "putonghua": return "ZH"
+        case "yue", "cantonese", "zh-yue": return "口音:粤语"
+        case "ja", "jp", "japanese": return "JA"
+        case "ko", "korean": return "KO"
+        default:
+            // Bare ISO-ish code (2-3 letters): pass through uppercased.
+            if (2...3).contains(raw.count), raw.allSatisfy({ $0.isLetter }) {
+                return raw.uppercased()
+            }
+            return nil
+        }
+    }
+}
+
 /// Builds the generation schedule for the default "tts" template
 /// `[文本]{text}[文本对应语音]{audio}`. Mirrors build_generation_schedule:
 /// each literal segment and the text are tokenized independently
@@ -51,7 +87,8 @@ public enum DotsTemplate {
         targetText: String,
         maxAudioTokens: Int,
         tokenizer: Tokenizer,
-        special: DotsSpecialTokens
+        special: DotsSpecialTokens,
+        language: String? = nil
     ) -> [Int] {
         precondition(maxAudioTokens > 0, "maxAudioTokens must be positive")
         // Mirror runtime `_process_prompt_text` / `_process_text`: strip both, and
@@ -61,12 +98,19 @@ public enum DotsTemplate {
         // KV cache, which degrades the cloned voice and runs generation long.
         let prompt = (promptText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let target = targetText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let text: String
+        var text: String
         if prompt.isEmpty {
             text = target
         } else {
             let separator = containsCJK(prompt) ? "" : " "
             text = prompt + separator + target
+        }
+        // Optional language tag: the runtime prefixes `[CODE]` to the front of the
+        // combined prompt+target text (on prompt_text when present, else target).
+        // Off by default; only attached when the caller asks for a language.
+        if let code = DotsLanguageTag.code(for: language, text: text) {
+            let tag = "[\(code)]"
+            if !text.hasPrefix(tag) { text = tag + text }
         }
         var ids: [Int] = []
         ids += tokenizer.encode(text: textPrefix, addSpecialTokens: false)

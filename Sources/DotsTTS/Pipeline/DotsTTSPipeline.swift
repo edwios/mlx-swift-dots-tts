@@ -57,6 +57,10 @@ public final class DotsTTSPipeline: @unchecked Sendable {
         public var speakerScale: Float = 1.5
         /// Fixed-step ODE solver for the flow-matching path. Ignored by MeanFlow.
         public var odeMethod: ODEMethod = .euler
+        /// Optional model-side language tag prefixed to the text (e.g. "EN", "ZH",
+        /// "auto_detect"). nil / "none" attaches no tag (the default). See
+        /// `DotsLanguageTag` for accepted values.
+        public var language: String? = nil
         public var eosThreshold: Float = 0.8
         public var maxOutputPatches = 600
         public var seed: UInt64 = 0
@@ -455,7 +459,7 @@ public final class DotsTTSPipeline: @unchecked Sendable {
         let maxAudio = pc + params.maxOutputPatches
         let schedule = DotsTemplate.generationSchedule(
             promptText: refTranscript, targetText: targetText, maxAudioTokens: maxAudio,
-            tokenizer: tokenizer, special: special)
+            tokenizer: tokenizer, special: special, language: params.language)
         let promptEmbed = timedEval("patch_encoder_prefill", patchEncoder(refLatentsTrim))  // (1, pc, 1536)
 
         // span positions (audio_gen_span); prefill consumes the first pc.

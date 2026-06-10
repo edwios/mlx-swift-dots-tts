@@ -203,10 +203,14 @@ public final class DotsTTSPipeline: @unchecked Sendable {
         self.latentStd = sqrt(MLXArray(stats.var))
 
         let rs = try MLX.loadArrays(url: modelRepo.appendingPathComponent("resampler_48k_16k.safetensors"))
+        func r(_ k: String) throws -> MLXArray {
+            guard let v = rs[k] else { throw DotsTextError.missingWeight("resampler_48k_16k/\(k)") }
+            return v
+        }
         self.resampler = Resampler(
-            origRate: rs["orig"]!.item(Int.self), newRate: rs["new"]!.item(Int.self),
-            gcd: rs["gcd"]!.item(Int.self), width: rs["width"]!.item(Int.self),
-            torchKernel: rs["kernel"]!.asType(.float32))
+            origRate: try r("orig").item(Int.self), newRate: try r("new").item(Int.self),
+            gcd: try r("gcd").item(Int.self), width: try r("width").item(Int.self),
+            torchKernel: try r("kernel").asType(.float32))
 
         self.tokenizer = tokenizer
         self.special = try DotsSpecialTokens(tokenizer: tokenizer)
@@ -283,6 +287,8 @@ public final class DotsTTSPipeline: @unchecked Sendable {
     /// resampled to 16 kHz, fbank'd, and run through CAM++ + xvec_proj.
     public func speakerCond(refAudio48k: MLXArray, scale: Float) -> MLXArray {
         var w = refAudio48k
+        precondition(w.ndim != 2 || w.dim(0) == 1,
+                     "refAudio48k must be mono (N,) or (1, N); got shape \(w.shape). Downmix first.")
         if w.ndim == 2 { w = w.reshaped(w.dim(w.ndim - 1)) }
         let maxSamples = Int((maxSpeakerSeconds * Double(speakerSourceRate)).rounded())
         if w.dim(0) > maxSamples { w = w[0 ..< maxSamples] }
@@ -436,6 +442,10 @@ public final class DotsTTSPipeline: @unchecked Sendable {
     /// Generate a 48 kHz waveform (1, 1, samples). Voice cloning needs a
     /// reference clip + its transcript; targetText is what to speak.
     public func generate(targetText: String, refAudio48k: MLXArray, refTranscript: String, params: Params = Params()) -> MLXArray {
+        // maxOutputPatches is public and settable; 0 makes the text schedule
+        // produce no decode spans and `spans[pc]` traps below.
+        precondition(params.maxOutputPatches >= 1,
+                     "params.maxOutputPatches must be >= 1 (got \(params.maxOutputPatches))")
         MLXRandom.seed(params.seed)
         // Python pads the prompt audio before BOTH the speaker encoder and the VAE.
         let pad = padTo(refAudio48k, multiple: patchSize * hopSize)
@@ -453,6 +463,12 @@ public final class DotsTTSPipeline: @unchecked Sendable {
         }
         timedEval("audio_vae", refLatentsTrim)
         let pc = refLatentsTrim.dim(1) / patchSize
+        // After the VAE downsample (x1920) and last-patch trim, a reference of
+        // ~7680 samples (~0.16s) or shorter leaves zero prompt patches, which
+        // would later trap on the patch encoder and the nil FM history.
+        precondition(pc >= 1,
+                     "reference audio is too short: produced \(pc) prompt patches (need >= 1). " +
+                     "Supply a longer reference clip (more than ~0.2s of speech).")
         let promptPatches = normalize(refLatentsTrim).reshaped(1, pc, patchSize, latentDim)
 
         // schedule + prefill embeddings (patch encoder over the reference latents).
@@ -550,6 +566,8 @@ public final class DotsTTSPipeline: @unchecked Sendable {
 
     private func padTo(_ audio: MLXArray, multiple: Int) -> MLXArray {
         var w = audio
+        precondition(w.ndim != 2 || w.dim(0) == 1,
+                     "refAudio48k must be mono (N,) or (1, N); got shape \(w.shape). Downmix first.")
         if w.ndim == 2 { w = w.reshaped(w.dim(w.ndim - 1)) }
         let n = w.dim(0)
         let target = Int((Double(n) / Double(multiple)).rounded(.up)) * multiple

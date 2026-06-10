@@ -9,7 +9,9 @@ import MLXNN
 ///   ds_proj (causal Conv1d 128->128, k2 s2)  -> halve time
 ///   in_proj (Linear 128->1024)
 ///   24x causal pre-norm transformer (16 heads, head_dim 64, RMSNorm,
-///     NeoX rotary theta 10000, affine-free qk-norm, SiLU FFN 1024->4096->1024)
+///     no rotary, no qk-norm, SiLU FFN 1024->4096->1024). The reference config
+///     sets qk_norm=False and rotary_bias=False; enabling either breaks parity
+///     by three orders of magnitude (see MultiHeadSelfAttention).
 ///   group every 2 tokens (-> 2048)
 ///   out_proj (Linear 2048->1536)
 ///
@@ -53,7 +55,12 @@ public final class PatchEncoder: Module {
     }
 
     /// x: (B, L, 128) un-normalised, trimmed latents. Returns (B, L/4, 1536).
+    /// L must be a multiple of 4: the stride-2 ds_proj halves it and the output
+    /// grouping pairs two tokens, so an odd token count after downsampling traps
+    /// in the projection reshape.
     public func callAsFunction(_ x: MLXArray) -> MLXArray {
+        precondition(x.dim(1) % (2 * cfg.outDsRate) == 0,
+                     "PatchEncoder input length \(x.dim(1)) must be a multiple of \(2 * cfg.outDsRate)")
         // ds_proj: causal Conv1d over time. mlx Conv1d is channels-last (B,L,C),
         // matching x. Causal k2 s2 = left-pad by dilation*(k-1)=1, then conv pad0.
         let padded = padded(x, widths: [.init((0, 0)), .init((1, 0)), .init((0, 0))])

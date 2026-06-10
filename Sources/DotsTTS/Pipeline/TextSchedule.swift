@@ -30,6 +30,7 @@ public struct DotsSpecialTokens: Sendable {
 
 public enum DotsTextError: Error {
     case missingSpecialToken(String)
+    case missingWeight(String)
 }
 
 /// Resolves a user-supplied language string to the model-side tag content that

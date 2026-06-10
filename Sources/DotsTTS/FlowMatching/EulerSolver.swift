@@ -50,7 +50,7 @@ public final class EulerSolver: Module {
     /// - z:        (1, patchSize, latentDim)
     /// Returns guided velocity (1, patchSize, latentDim).
     private func solverStep(
-        t: MLXArray, z: MLXArray,
+        t: MLXArray, z: MLXArray, guidance: Float,
         inputSeq: MLXArray, cfgSeq: MLXArray, gCond: MLXArray, mask: MLXArray?
     ) -> MLXArray {
         let L = inputSeq.dim(1)
@@ -68,10 +68,8 @@ public final class EulerSolver: Module {
         vt = vt[0..., latentStart...]               // (2, patchSize, latentDim)
         let vCond = vt[0 ..< 1]
         let vUnc = vt[1 ..< 2]
-        return vCond + guidanceScale * (vCond - vUnc)
+        return vCond + guidance * (vCond - vUnc)
     }
-
-    private var guidanceScale: Float = 3.0
 
     /// Integrate the FM ODE from noise to a clean latent.
     /// - noise:    (1, patchSize, latentDim) initial sample
@@ -87,14 +85,14 @@ public final class EulerSolver: Module {
         numSteps: Int = 10, guidance: Float = 3.0, method: ODEMethod = .euler,
         mask: MLXArray? = nil
     ) -> MLXArray {
-        guidanceScale = guidance
+        precondition(numSteps > 0, "numSteps must be > 0 (got \(numSteps))")
         var z = noise
         let dt = 1.0 / Float(numSteps)
 
         // Guided velocity at (z, t). One call = one 2-batch DiT forward.
         func f(_ t: Float, _ zz: MLXArray) -> MLXArray {
             solverStep(
-                t: MLXArray(t), z: zz, inputSeq: inputSeq, cfgSeq: cfgSeq,
+                t: MLXArray(t), z: zz, guidance: guidance, inputSeq: inputSeq, cfgSeq: cfgSeq,
                 gCond: gCond, mask: mask)
         }
 
@@ -129,6 +127,7 @@ public final class EulerSolver: Module {
     public func solveMeanFlow(
         noise: MLXArray, inputSeq: MLXArray, gCond: MLXArray, nfe: Int = 4, mask: MLXArray? = nil
     ) -> MLXArray {
+        precondition(nfe > 0, "nfe must be > 0 (got \(nfe))")
         let L = inputSeq.dim(1)
         let latentStart = L - patchSize
         var z = noise

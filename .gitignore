@@ -5,6 +5,7 @@
 Package.resolved
 .netrc
 # local model weights / scratch
+dots.tts-soar-mlx
 *.safetensors
 *.npz
 .claude/

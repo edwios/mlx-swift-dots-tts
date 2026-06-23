@@ -85,6 +85,13 @@ swift test
 
 `swift build` compiles, but the SwiftPM debug/test binary crashes on the first MLX op because the Metal kernels aren't compiled into it. Run MLX tests with `mlx.metallib` colocated next to the test runner, or consume the package from an app built with xcodebuild. Heavy parity and end-to-end tests are gated behind `DOTS_RUN_E2E=1` / `DOTS_RUN_DECODE_PARITY=1` and read fixtures from paths set by `DOTS_MODEL_REPO` / `DOTS_FIXTURES`.
 
+## Apps
+
+| App | Description |
+|-----|-------------|
+| [app/](app/) | `dots-tts` CLI — one-shot synthesis and `--tts-daemon` for cached MLX inference |
+| [oc-interactive/](oc-interactive/) | OpenClaw voice chat — sends text to an agent and speaks replies via `dots-tts` |
+
 ## License
 
 Apache-2.0. Model weights and architecture derive from rednote-hilab's dots.tts-soar (Apache-2.0).

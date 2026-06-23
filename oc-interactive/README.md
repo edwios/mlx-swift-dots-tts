@@ -2,9 +2,12 @@
 
 Python CLI that sends text to an [OpenClaw](https://docs.openclaw.ai/) agent and speaks the reply through your speakers using the Swift [`dots-tts`](../app/) voice-cloning binary.
 
-Each conversational turn is a **separate shell invocation**. A background daemon auto-starts to orchestrate OpenClaw requests and TTS playback.
+Each conversational turn is a **separate shell invocation**. Two background daemons auto-start:
 
-> A native Swift implementation with in-process MLX TTS is planned separately; this Python app delegates synthesis to `dots-tts`.
+1. **Orchestration daemon** (`oc_interactive --daemon`) — OpenClaw chat, slash commands, session state, afplay.
+2. **TTS daemon** (`dots-tts --tts-daemon`) — cached MLX model and reference audio for synthesis.
+
+> A native Swift oc-interactive with fully in-process MLX is planned separately; this Python app delegates synthesis to the `dots-tts` TTS daemon.
 
 ## Requirements
 
@@ -39,7 +42,7 @@ This creates `.venv/` and installs the `oc-interactive` command into `.venv/bin/
 
 ```bash
 cd oc-interactive
-./run -t "Hello" -r path/to/reference.wav -m ../dots.tts-soar-mlx/4bit
+./run --debug -t "Hello" -r path/to/reference.wav -m ../dots.tts-soar-mlx/4bit --dots-tts ../app/.build/dots-tts
 ```
 
 **Option B — full path:**
@@ -87,6 +90,7 @@ Edit paths as needed. Example:
 
 - `openclawToken`: use `$VAR_NAME` to read from the environment.
 - `agents`: allowlist validated against `--agent` (CLI value is prefixed with `openclaw/` automatically).
+- `dotsTtsBinary`: path to the built `dots-tts` binary. Use an **absolute** path when the config lives under `~/.config/oc-interactive/` (relative paths resolve against the config file's directory).
 - `ssh` block is informational only; start your tunnel separately.
 
 ```bash
@@ -120,6 +124,16 @@ Use `--debug` (or `OC_INTERACTIVE_DEBUG=1`) to print timing in `daemon.log`:
 - OpenClaw round-trip is separate (`openclawMs`) and may be 30–60s depending on the agent.
 
 The TTS daemon idles out after 30 minutes; the next spoken turn reloads the model once.
+
+Typical timings with `--debug` (short reply, warm cache):
+
+| Phase | First turn | Later turns |
+|-------|------------|-------------|
+| OpenClaw (`openclawMs`) | 30–60s | 30–60s |
+| MLX model load (`loadMs`, when `modelReloaded=True`) | ~2–5s | ~0 |
+| Synthesis (`synthMs`) | ~1–4s | ~1–4s |
+
+Long agent replies (or `/help`) increase `synthMs` proportionally; that is not a model reload.
 
 ### Agent selection
 
@@ -165,7 +179,7 @@ Under `~/.config/oc-interactive/` (override with `OC_INTERACTIVE_STATE_DIR`):
 
 | File | Purpose |
 |------|---------|
-| `session.json` | Conversation history, system prompt, cached paths |
+| `session.json` | Conversation history, system prompt, cached `lastRefaudio` / `lastTtsModel` / `lastDotsTts` |
 | `daemon.sock` | Unix socket IPC |
 | `daemon.pid` | Background daemon PID |
 | `daemon.log` | Background orchestration daemon logs |
@@ -174,6 +188,21 @@ Under `~/.config/oc-interactive/` (override with `OC_INTERACTIVE_STATE_DIR`):
 | `tts-daemon.log` | TTS daemon logs (model load / synth timing) |
 
 The orchestration daemon shuts down after 30 minutes idle; the next invocation restarts it. The TTS daemon has the same idle timeout but is restarted automatically when speech is needed.
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---------|----------------|
+| Very slow every turn (`modelReloaded=True` always) | Rebuild `dots-tts` (`cd app && make build`). Ensure `tts-daemon.log` shows the daemon staying alive between turns. |
+| `peer closed connection` / no audio | Stale socket after a crashed daemon — remove `tts-daemon.sock` and `tts-daemon.pid`, or restart. Check `tts-daemon.log`. |
+| `dots-tts not found` on turn 2+ | Pass `--dots-tts` on the first turn, or set an absolute `dotsTtsBinary` in config (cached as `lastDotsTts` in session). |
+| Client times out but audio plays | OpenClaw + first model load can exceed older timeouts; current client allows 10 minutes. Check `daemon.log`. |
+
+After code changes, restart the orchestration daemon so it picks up the installed package:
+
+```bash
+pkill -f "oc_interactive --daemon"
+```
 
 ## Errors
 

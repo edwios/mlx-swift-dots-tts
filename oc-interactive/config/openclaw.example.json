@@ -3,7 +3,7 @@
   "openclawToken": "$ELLO_GATEWAY_TOKEN",
   "defaultAgent": "main",
   "agents": ["main", "news", "eileen"],
-  "dotsTtsBinary": "../app/.build/dots-tts",
+  "dotsTtsBinary": "/absolute/path/to/mlx-swift-dots-tts/app/.build/dots-tts",
   "ssh": {
     "enabled": true,
     "host": "ello.local",

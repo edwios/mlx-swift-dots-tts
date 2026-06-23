@@ -61,6 +61,49 @@ Short flags:
 ./.build/dots-tts -t "Hello world." -r reference.wav -l EN -o output.wav -m ../dots.tts-soar-mlx
 ```
 
+### TTS daemon (cached model)
+
+For repeated synthesis (e.g. [oc-interactive](../oc-interactive/)), run a persistent daemon that keeps the MLX model and reference audio in memory:
+
+```bash
+cd .build
+OC_INTERACTIVE_STATE_DIR=~/.config/oc-interactive ./dots-tts --tts-daemon
+```
+
+The daemon listens on a Unix socket at `$OC_INTERACTIVE_STATE_DIR/tts-daemon.sock` (default `~/.config/oc-interactive/`) and writes its PID to `tts-daemon.pid`. It shuts down after 30 minutes idle.
+
+**Request** (4-byte big-endian length prefix + JSON):
+
+```json
+{
+  "text": "[EN]Hello world.",
+  "refaudio": "/path/to/reference.wav",
+  "model": "/path/to/dots.tts-soar-mlx/4bit",
+  "language": "EN",
+  "output": "/tmp/out.wav",
+  "debug": false
+}
+```
+
+**Response** (same framing):
+
+```json
+{
+  "ok": true,
+  "modelReloaded": false,
+  "refaudioReloaded": false,
+  "loadMs": 0,
+  "synthMs": 1100
+}
+```
+
+- `modelReloaded` / `refaudioReloaded` — `true` when the MLX pipeline or reference clip was (re)loaded; `false` on cache hits.
+- `loadMs` — time spent loading model/reference before synthesis.
+- `synthMs` — synthesis time for the request.
+- Set `"debug": true` or `OC_INTERACTIVE_DEBUG=1` for per-request cache logs on stderr.
+
+`oc-interactive` auto-starts this daemon; you normally do not run it manually.
+
 ### Arguments
 
 | Flag | Required | Default | Description |

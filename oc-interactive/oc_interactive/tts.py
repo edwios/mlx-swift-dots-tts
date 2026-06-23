@@ -8,6 +8,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from oc_interactive.io import eprint
 from oc_interactive.speakable import tag_for_tts
 from oc_interactive.tts_daemon import synthesize_to_wav
 
@@ -58,10 +59,9 @@ def synthesize_and_play(
             ref_reloaded = resp.get("refaudioReloaded", False)
             load_ms = resp.get("loadMs", 0)
             synth_ms = resp.get("synthMs", 0)
-            print(
+            eprint(
                 f"[oc-interactive] tts-daemon modelReloaded={model_reloaded} "
-                f"refaudioReloaded={ref_reloaded} loadMs={load_ms:.0f} synthMs={synth_ms:.0f}",
-                file=sys.stderr,
+                f"refaudioReloaded={ref_reloaded} loadMs={load_ms:.0f} synthMs={synth_ms:.0f}"
             )
 
         play = subprocess.run(

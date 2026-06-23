@@ -9,11 +9,13 @@ import socket
 import sys
 import time
 import traceback
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from oc_interactive.client import CONNECT_TIMEOUT_SEC, IDLE_TIMEOUT_SEC
 from oc_interactive.config import OpenClawConfig, load_config
+from oc_interactive.io import eprint
 from oc_interactive.openclaw import OpenClawError, chat_completion
 from oc_interactive.paths import (
     daemon_pid_path,
@@ -39,6 +41,12 @@ from oc_interactive.speakable import agent_error_line, ensure_utf8, tag_for_tts
 from oc_interactive.tts import TTSError, synthesize_and_play
 
 
+@dataclass
+class RequestResult:
+    reply: str | None = None
+    error: str | None = None
+
+
 def run_daemon() -> int:
     ensure_state_dir()
     sock_path = daemon_sock_path()
@@ -55,16 +63,12 @@ def run_daemon() -> int:
     server.settimeout(1.0)
 
     last_activity = time.monotonic()
-    print("[oc-interactive-daemon] ready", file=sys.stderr, flush=True)
+    eprint("[oc-interactive-daemon] ready", flush=True)
 
     try:
         while True:
             if time.monotonic() - last_activity > IDLE_TIMEOUT_SEC:
-                print(
-                    "[oc-interactive-daemon] idle timeout, shutting down",
-                    file=sys.stderr,
-                    flush=True,
-                )
+                eprint("[oc-interactive-daemon] idle timeout, shutting down", flush=True)
                 break
             try:
                 conn, _ = server.accept()
@@ -109,14 +113,16 @@ def _handle_connection(conn: socket.socket) -> dict[str, Any]:
     length = int.from_bytes(header, "big")
     body = _recv_exact(conn, length)
     request = json.loads(body.decode("utf-8"))
-    reply = _process_request(request)
+    result = _process_request(request)
     response: dict[str, Any] = {"ok": True}
-    if reply is not None:
-        response["reply"] = reply
+    if result.reply is not None:
+        response["reply"] = result.reply
+    if result.error is not None:
+        response["error"] = result.error
     return response
 
 
-def _process_request(req: dict[str, Any]) -> str | None:
+def _process_request(req: dict[str, Any]) -> RequestResult:
     text = str(req.get("text", ""))
     agent_name = str(req.get("agent", "main"))
     refaudio = str(req.get("refaudio", ""))
@@ -156,7 +162,7 @@ def _process_request(req: dict[str, Any]) -> str | None:
             dots_tts_bin=dots_tts_bin,
             debug=debug,
         )
-        return None
+        return RequestResult()
 
     return _handle_chat(
         text,
@@ -217,7 +223,7 @@ def _handle_slash(
             dots_tts_bin=dots_tts_bin,
         )
         spoken = confirmation_text(slash)
-        print(f"[oc-interactive] new session {session.user_id}", file=sys.stderr)
+        eprint(f"[oc-interactive] new session {session.user_id}")
         _speak(spoken, refaudio=refaudio, reftext=reftext, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
         return
 
@@ -232,9 +238,8 @@ def _handle_slash(
             dots_tts_bin=dots_tts_bin,
         )
         spoken = confirmation_text(slash)
-        print(
-            f"[oc-interactive] system prompt {'set' if slash.value else 'cleared'}",
-            file=sys.stderr,
+        eprint(
+            f"[oc-interactive] system prompt {'set' if slash.value else 'cleared'}"
         )
         _speak(spoken, refaudio=refaudio, reftext=reftext, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
         return
@@ -259,10 +264,9 @@ def _handle_slash(
             f"Session active. Agent {agent}. "
             f"{count} messages. System prompt is {prompt_set}."
         )
-        print(
+        eprint(
             f"[oc-interactive] session={session.user_id} agent={agent} "
-            f"messages={count} system_prompt={prompt_set}",
-            file=sys.stderr,
+            f"messages={count} system_prompt={prompt_set}"
         )
         _cache_tts_paths(
             session,
@@ -290,7 +294,7 @@ def _handle_chat(
     tts_model: str,
     dots_tts_bin: Path,
     debug: bool,
-) -> str:
+) -> RequestResult:
     session = load_session()
     session.last_refaudio = refaudio
     session.last_reftext = reftext
@@ -301,6 +305,7 @@ def _handle_chat(
     api_messages = build_api_messages(session, text)
 
     spoken_raw: str
+    openclaw_failed = False
     openclaw_start = time.monotonic()
     try:
         reply = chat_completion(
@@ -312,22 +317,24 @@ def _handle_chat(
         )
         spoken_raw = ensure_utf8(reply)
     except OpenClawError as e:
+        openclaw_failed = True
         spoken_raw = agent_error_line(str(e))
-        print(f"[oc-interactive] openclaw error: {e}", file=sys.stderr)
+        eprint(f"[oc-interactive] openclaw error: {e}")
     except Exception as e:
+        openclaw_failed = True
         spoken_raw = agent_error_line(str(e))
-        print(f"[oc-interactive] chat error: {e}", file=sys.stderr)
+        eprint(f"[oc-interactive] chat error: {e}")
         traceback.print_exc(file=sys.stderr)
     openclaw_ms = (time.monotonic() - openclaw_start) * 1000
     if debug:
-        print(f"[oc-interactive] openclawMs={openclaw_ms:.0f}", file=sys.stderr)
+        eprint(f"[oc-interactive] openclawMs={openclaw_ms:.0f}")
 
     append_user_message(session, text)
     append_assistant_message(session, spoken_raw, agent=agent)
     save_session(session)
 
     spoken = tag_for_tts(spoken_raw)
-    print(f"[oc-interactive] speaking: {spoken[:80]}…", file=sys.stderr)
+    eprint(f"[oc-interactive] speaking: {spoken[:80]}…")
     _speak(
         spoken,
         refaudio=refaudio,
@@ -336,7 +343,9 @@ def _handle_chat(
         dots_tts_bin=dots_tts_bin,
         debug=debug,
     )
-    return spoken_raw
+    if openclaw_failed:
+        return RequestResult(error=spoken_raw)
+    return RequestResult(reply=spoken_raw)
 
 
 def _speak(

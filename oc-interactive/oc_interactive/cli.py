@@ -11,6 +11,7 @@ from pathlib import Path
 from oc_interactive.client import send_request
 from oc_interactive.config import load_config
 from oc_interactive.daemon import main as daemon_main
+from oc_interactive.io import CliError, eprint
 from oc_interactive.paths import default_config_path, debug_enabled
 from oc_interactive.session import load_session
 from oc_interactive.slash import (
@@ -45,7 +46,11 @@ def _resolve_text(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    class Parser(argparse.ArgumentParser):
+        def error(self, message: str) -> None:
+            self.exit(2, f"error: {message}\n")
+
+    p = Parser(
         prog="oc-interactive",
         description=(
             "Send text to an OpenClaw agent and speak the reply via dots-tts. "
@@ -132,16 +137,14 @@ def _resolve_paths(
         refaudio = str(Path(refaudio).expanduser().resolve())
         reftext_arg = (args.reftext or "").strip()
         if not reftext_arg:
-            raise SystemExit(
-                "error: --reftext is required when --refaudio is provided"
-            )
+            raise CliError("--reftext is required when --refaudio is provided")
         reftext = reftext_arg
     elif session.last_refaudio:
         refaudio = session.last_refaudio
         reftext = session.last_reftext
     else:
-        raise SystemExit(
-            "error: --refaudio is required on the first turn (no cached reference audio)"
+        raise CliError(
+            "--refaudio is required on the first turn (no cached reference audio)"
         )
 
     tts_model = args.model
@@ -172,11 +175,16 @@ def _handle_dump(agent: str) -> int:
     session = load_session()
     doc = session.dump_document(agent=agent)
     sys.stdout.write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
-    print(
-        f"[oc-interactive] dumped {doc['messageCount']} messages",
-        file=sys.stderr,
-    )
+    eprint(f"[oc-interactive] dumped {doc['messageCount']} messages")
     return 0
+
+
+def _report_error(message: str) -> int:
+    text = str(message).strip()
+    if text and not text.startswith("error:"):
+        text = f"error: {text}"
+    eprint(text)
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -199,28 +207,22 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = load_config(config_path)
     except (FileNotFoundError, ValueError) as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 1
+        return _report_error(str(e))
 
     try:
         agent = cfg.resolve_agent(args.agent)
     except ValueError as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 1
+        return _report_error(str(e))
 
-    # Spoken commands and chat need refaudio/model/dots-tts
     try:
         refaudio, reftext, tts_model, dots_path = _resolve_paths(args, cfg)
-    except SystemExit as e:
-        print(str(e), file=sys.stderr)
-        return 1
+    except CliError as e:
+        return _report_error(str(e))
 
     if not dots_path.exists():
-        print(
-            f"error: dots-tts not found at {dots_path}; build with: cd app && make build",
-            file=sys.stderr,
+        return _report_error(
+            f"dots-tts not found at {dots_path}; build with: cd app && make build"
         )
-        return 1
 
     payload = {
         "text": text,
@@ -234,34 +236,29 @@ def main(argv: list[str] | None = None) -> int:
         "debug": debug_enabled(args.debug),
     }
 
-    print("[oc-interactive] waiting for agent reply and TTS…", file=sys.stderr)
+    eprint("[oc-interactive] waiting for agent reply and TTS…")
     try:
         resp = send_request(payload)
-    except (TimeoutError, socket.timeout) as e:
-        print(
-            "error: timed out waiting for daemon (OpenClaw + TTS can take several minutes on first run); "
-            "audio may still play — check daemon.log",
-            file=sys.stderr,
+    except (TimeoutError, socket.timeout):
+        return _report_error(
+            "timed out waiting for daemon (OpenClaw + TTS can take several minutes on first run); "
+            "audio may still play — check daemon.log"
         )
-        return 1
     except OSError as e:
         if "timed out" in str(e).lower():
-            print(
-                "error: timed out waiting for daemon (OpenClaw + TTS can take several minutes on first run); "
-                "audio may still play — check daemon.log",
-                file=sys.stderr,
+            return _report_error(
+                "timed out waiting for daemon (OpenClaw + TTS can take several minutes on first run); "
+                "audio may still play — check daemon.log"
             )
-            return 1
-        print(f"error: {e}", file=sys.stderr)
-        return 1
+        return _report_error(str(e))
     except Exception as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 1
+        return _report_error(str(e))
 
     if not resp.get("ok"):
-        err = resp.get("error", "unknown error")
-        print(f"error: {err}", file=sys.stderr)
-        return 1
+        return _report_error(str(resp.get("error", "unknown error")))
+
+    if err := resp.get("error"):
+        eprint(err)
 
     if args.verbose:
         reply = resp.get("reply")

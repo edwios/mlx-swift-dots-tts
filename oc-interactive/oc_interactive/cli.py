@@ -20,6 +20,30 @@ from oc_interactive.slash import (
 )
 
 
+def _read_stdin_text() -> str | None:
+    """Return piped stdin text, or None when stdin is a TTY or empty."""
+    if sys.stdin.isatty():
+        return None
+    data = sys.stdin.read()
+    if not data:
+        return None
+    return data.removesuffix("\n")
+
+
+def _resolve_text(args: argparse.Namespace, parser: argparse.ArgumentParser) -> str:
+    """stdin wins over -t/--text when both are present."""
+    stdin_text = _read_stdin_text()
+    if stdin_text is not None:
+        text = stdin_text
+    elif args.text:
+        text = args.text
+    else:
+        parser.error("text is required via stdin or -t/--text")
+    if not text:
+        parser.error("text is required via stdin or -t/--text")
+    return text
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="oc-interactive",
@@ -32,7 +56,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "-t",
         "--text",
         required=False,
-        help="UTF-8 text to send, or a slash command (e.g. /new, /history).",
+        help="UTF-8 text to send, or a slash command (e.g. /new, /history). "
+        "Omit when piping text on stdin; stdin wins if both are given.",
     )
     p.add_argument(
         "-r",
@@ -79,6 +104,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--debug",
         action="store_true",
         help="Log timing and TTS model cache status (or set OC_INTERACTIVE_DEBUG=1).",
+    )
+    p.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Print the OpenClaw agent reply to stdout.",
     )
     p.add_argument(
         "--daemon",
@@ -154,10 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.daemon:
         return daemon_main()
 
-    if not args.text:
-        parser.error("the following arguments are required: -t/--text")
-
-    text = args.text
+    text = _resolve_text(args, parser)
 
     if is_slash_command(text):
         slash = parse_slash_command(text)
@@ -233,6 +262,11 @@ def main(argv: list[str] | None = None) -> int:
         err = resp.get("error", "unknown error")
         print(f"error: {err}", file=sys.stderr)
         return 1
+
+    if args.verbose:
+        reply = resp.get("reply")
+        if isinstance(reply, str) and reply:
+            sys.stdout.write(reply + "\n")
 
     return 0
 

@@ -109,11 +109,14 @@ def _handle_connection(conn: socket.socket) -> dict[str, Any]:
     length = int.from_bytes(header, "big")
     body = _recv_exact(conn, length)
     request = json.loads(body.decode("utf-8"))
-    _process_request(request)
-    return {"ok": True}
+    reply = _process_request(request)
+    response: dict[str, Any] = {"ok": True}
+    if reply is not None:
+        response["reply"] = reply
+    return response
 
 
-def _process_request(req: dict[str, Any]) -> None:
+def _process_request(req: dict[str, Any]) -> str | None:
     text = str(req.get("text", ""))
     agent_name = str(req.get("agent", "main"))
     refaudio = str(req.get("refaudio", ""))
@@ -153,9 +156,9 @@ def _process_request(req: dict[str, Any]) -> None:
             dots_tts_bin=dots_tts_bin,
             debug=debug,
         )
-        return
+        return None
 
-    _handle_chat(
+    return _handle_chat(
         text,
         cfg=cfg,
         token=token,
@@ -287,7 +290,7 @@ def _handle_chat(
     tts_model: str,
     dots_tts_bin: Path,
     debug: bool,
-) -> None:
+) -> str:
     session = load_session()
     session.last_refaudio = refaudio
     session.last_reftext = reftext
@@ -333,6 +336,7 @@ def _handle_chat(
         dots_tts_bin=dots_tts_bin,
         debug=debug,
     )
+    return spoken_raw
 
 
 def _speak(

@@ -85,7 +85,6 @@ def _spawn_daemon() -> None:
         stdout=log_file,
         stderr=log_file,
         start_new_session=True,
-        close_fds=True,
         env=env,
     )
     log_file.close()

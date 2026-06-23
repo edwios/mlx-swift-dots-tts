@@ -4,7 +4,6 @@ import Foundation
 import MLX
 import Tokenizers
 
-@main
 struct DotsTTSCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "dots-tts",

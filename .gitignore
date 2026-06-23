@@ -17,3 +17,4 @@ oc-interactive/.eggs/
 oc-interactive/.verify-state/
 oc-interactive/.verify-config.json
 oc-interactive/.DS_Store
+oc-interactive/**/tts-daemon.log

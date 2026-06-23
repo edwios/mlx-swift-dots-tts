@@ -18,6 +18,7 @@ from oc_interactive.openclaw import OpenClawError, chat_completion
 from oc_interactive.paths import (
     daemon_pid_path,
     daemon_sock_path,
+    debug_enabled,
     ensure_state_dir,
 )
 from oc_interactive.session import (
@@ -136,6 +137,7 @@ def _process_request(req: dict[str, Any]) -> None:
         raise FileNotFoundError(f"dots-tts binary not found: {dots_tts_bin}")
 
     slash = parse_slash_command(text)
+    debug = bool(req.get("debug")) or debug_enabled()
     if slash is not None:
         _handle_slash(
             slash,
@@ -143,6 +145,7 @@ def _process_request(req: dict[str, Any]) -> None:
             refaudio=refaudio,
             tts_model=tts_model,
             dots_tts_bin=dots_tts_bin,
+            debug=debug,
         )
         return
 
@@ -155,15 +158,22 @@ def _process_request(req: dict[str, Any]) -> None:
         refaudio=refaudio,
         tts_model=tts_model,
         dots_tts_bin=dots_tts_bin,
+        debug=debug,
     )
 
 
 def _cache_tts_paths(
-    session: Session, *, refaudio: str, tts_model: str, agent: str
+    session: Session,
+    *,
+    refaudio: str,
+    tts_model: str,
+    agent: str,
+    dots_tts_bin: Path,
 ) -> None:
     session.last_refaudio = refaudio
     session.last_tts_model = tts_model
     session.last_agent = agent
+    session.last_dots_tts = str(dots_tts_bin)
     save_session(session)
 
 
@@ -174,37 +184,56 @@ def _handle_slash(
     refaudio: str,
     tts_model: str,
     dots_tts_bin: Path,
+    debug: bool,
 ) -> None:
     session = load_session()
 
     if slash.kind == SlashKind.UNKNOWN:
         spoken = agent_error_line(f"unknown command {slash.raw_verb!r}")
-        _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin)
+        _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
         raise ValueError(spoken)
 
     if slash.kind == SlashKind.NEW_SESSION:
         session = new_session(keep_system_prompt=True)
-        _cache_tts_paths(session, refaudio=refaudio, tts_model=tts_model, agent=agent)
+        _cache_tts_paths(
+            session,
+            refaudio=refaudio,
+            tts_model=tts_model,
+            agent=agent,
+            dots_tts_bin=dots_tts_bin,
+        )
         spoken = confirmation_text(slash)
         print(f"[oc-interactive] new session {session.user_id}", file=sys.stderr)
-        _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin)
+        _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
         return
 
     if slash.kind == SlashKind.SET_SYSTEM_PROMPT:
         session.system_prompt = slash.value or None
-        _cache_tts_paths(session, refaudio=refaudio, tts_model=tts_model, agent=agent)
+        _cache_tts_paths(
+            session,
+            refaudio=refaudio,
+            tts_model=tts_model,
+            agent=agent,
+            dots_tts_bin=dots_tts_bin,
+        )
         spoken = confirmation_text(slash)
         print(
             f"[oc-interactive] system prompt {'set' if slash.value else 'cleared'}",
             file=sys.stderr,
         )
-        _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin)
+        _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
         return
 
     if slash.kind == SlashKind.HELP:
-        _cache_tts_paths(session, refaudio=refaudio, tts_model=tts_model, agent=agent)
+        _cache_tts_paths(
+            session,
+            refaudio=refaudio,
+            tts_model=tts_model,
+            agent=agent,
+            dots_tts_bin=dots_tts_bin,
+        )
         spoken = confirmation_text(slash)
-        _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin)
+        _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
         return
 
     if slash.kind == SlashKind.STATUS:
@@ -219,8 +248,14 @@ def _handle_slash(
             f"messages={count} system_prompt={prompt_set}",
             file=sys.stderr,
         )
-        _cache_tts_paths(session, refaudio=refaudio, tts_model=tts_model, agent=agent)
-        _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin)
+        _cache_tts_paths(
+            session,
+            refaudio=refaudio,
+            tts_model=tts_model,
+            agent=agent,
+            dots_tts_bin=dots_tts_bin,
+        )
+        _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
         return
 
     raise ValueError(f"unhandled slash command: {slash.kind}")
@@ -236,15 +271,18 @@ def _handle_chat(
     refaudio: str,
     tts_model: str,
     dots_tts_bin: Path,
+    debug: bool,
 ) -> None:
     session = load_session()
     session.last_refaudio = refaudio
     session.last_tts_model = tts_model
     session.last_agent = agent
+    session.last_dots_tts = str(dots_tts_bin)
 
     api_messages = build_api_messages(session, text)
 
     spoken_raw: str
+    openclaw_start = time.monotonic()
     try:
         reply = chat_completion(
             base_url=cfg.base_url,
@@ -261,6 +299,9 @@ def _handle_chat(
         spoken_raw = agent_error_line(str(e))
         print(f"[oc-interactive] chat error: {e}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
+    openclaw_ms = (time.monotonic() - openclaw_start) * 1000
+    if debug:
+        print(f"[oc-interactive] openclawMs={openclaw_ms:.0f}", file=sys.stderr)
 
     append_user_message(session, text)
     append_assistant_message(session, spoken_raw, agent=agent)
@@ -268,7 +309,13 @@ def _handle_chat(
 
     spoken = tag_for_tts(spoken_raw)
     print(f"[oc-interactive] speaking: {spoken[:80]}…", file=sys.stderr)
-    _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin)
+    _speak(
+        spoken,
+        refaudio=refaudio,
+        tts_model=tts_model,
+        dots_tts_bin=dots_tts_bin,
+        debug=debug,
+    )
 
 
 def _speak(
@@ -277,6 +324,7 @@ def _speak(
     refaudio: str,
     tts_model: str,
     dots_tts_bin: Path,
+    debug: bool,
 ) -> None:
     try:
         synthesize_and_play(
@@ -284,6 +332,7 @@ def _speak(
             refaudio=refaudio,
             model=tts_model,
             dots_tts_bin=dots_tts_bin,
+            debug=debug,
         )
     except TTSError as e:
         raise RuntimeError(f"TTS failed: {e}") from e

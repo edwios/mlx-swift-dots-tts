@@ -103,7 +103,23 @@ oc-interactive -t "Yea, me too. What's up?"
 oc-interactive -t "Well, what do you expect living in the middle of the Pacific?"
 ```
 
-After the first turn, `-r` and `-m` are optional (cached in `~/.config/oc-interactive/session.json`).
+After the first turn, `-r`, `-m`, and `--dots-tts` are optional (cached in `~/.config/oc-interactive/session.json`).
+
+### Model caching (performance)
+
+Synthesis uses a persistent **`dots-tts --tts-daemon`** process that keeps the MLX model loaded in memory. The first spoken turn pays a one-time model load cost (~2–5s); later turns reuse the cache and only pay synthesis time (~1–3s for short replies, longer for big ones).
+
+Use `--debug` (or `OC_INTERACTIVE_DEBUG=1`) to print timing in `daemon.log`:
+
+```
+[oc-interactive] openclawMs=1234
+[oc-interactive] tts-daemon modelReloaded=False refaudioReloaded=False loadMs=0 synthMs=1100
+```
+
+- `modelReloaded=True` on the first turn is expected; `False` on subsequent turns confirms caching.
+- OpenClaw round-trip is separate (`openclawMs`) and may be 30–60s depending on the agent.
+
+The TTS daemon idles out after 30 minutes; the next spoken turn reloads the model once.
 
 ### Agent selection
 
@@ -141,6 +157,7 @@ oc-interactive -t "/history" > conversation.json
 | `--agent` | OpenClaw agent short name |
 | `--openclaw-config` | Path to `openclaw.json` |
 | `--dots-tts` | Path to `dots-tts` binary |
+| `--debug` | Log OpenClaw/TTS timing and cache status (`OC_INTERACTIVE_DEBUG=1`) |
 
 ## State files
 
@@ -151,9 +168,12 @@ Under `~/.config/oc-interactive/` (override with `OC_INTERACTIVE_STATE_DIR`):
 | `session.json` | Conversation history, system prompt, cached paths |
 | `daemon.sock` | Unix socket IPC |
 | `daemon.pid` | Background daemon PID |
-| `daemon.log` | Daemon logs |
+| `daemon.log` | Background orchestration daemon logs |
+| `tts-daemon.sock` | Unix socket to cached MLX TTS daemon |
+| `tts-daemon.pid` | TTS daemon PID |
+| `tts-daemon.log` | TTS daemon logs (model load / synth timing) |
 
-The daemon shuts down after 30 minutes idle; the next invocation restarts it.
+The orchestration daemon shuts down after 30 minutes idle; the next invocation restarts it. The TTS daemon has the same idle timeout but is restarted automatically when speech is needed.
 
 ## Errors
 

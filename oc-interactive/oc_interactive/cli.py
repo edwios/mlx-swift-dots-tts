@@ -11,7 +11,7 @@ from pathlib import Path
 from oc_interactive.client import send_request
 from oc_interactive.config import load_config
 from oc_interactive.daemon import main as daemon_main
-from oc_interactive.paths import default_config_path
+from oc_interactive.paths import default_config_path, debug_enabled
 from oc_interactive.session import load_session
 from oc_interactive.slash import (
     is_dump_command,
@@ -72,6 +72,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to dots-tts binary (default from config or app/.build/dots-tts).",
     )
     p.add_argument(
+        "--debug",
+        action="store_true",
+        help="Log timing and TTS model cache status (or set OC_INTERACTIVE_DEBUG=1).",
+    )
+    p.add_argument(
         "--daemon",
         action="store_true",
         help=argparse.SUPPRESS,
@@ -106,6 +111,8 @@ def _resolve_paths(
     dots_bin = args.dots_tts
     if dots_bin:
         dots_path = Path(dots_bin).expanduser().resolve()
+    elif session.last_dots_tts:
+        dots_path = Path(session.last_dots_tts)
     elif cfg.dots_tts_binary:
         dots_path = cfg.dots_tts_binary
     else:
@@ -182,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
         "openclawConfig": str(config_path),
         "dotsTtsBinary": str(dots_path),
         "openclawToken": cfg.token,
+        "debug": debug_enabled(args.debug),
     }
 
     print("[oc-interactive] waiting for agent reply and TTS…", file=sys.stderr)

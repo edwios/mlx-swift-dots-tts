@@ -42,13 +42,13 @@ This creates `.venv/` and installs the `oc-interactive` command into `.venv/bin/
 
 ```bash
 cd oc-interactive
-./run --debug -t "Hello" -r path/to/reference.wav -m ../dots.tts-soar-mlx/4bit --dots-tts ../app/.build/dots-tts
+./run --debug -t "Hello" -r path/to/reference.wav --reftext "What the speaker says in the clip" -m ../dots.tts-soar-mlx/4bit --dots-tts ../app/.build/dots-tts
 ```
 
 **Option B — full path:**
 
 ```bash
-oc-interactive/.venv/bin/oc-interactive -t "Hello" -r reference.wav
+oc-interactive/.venv/bin/oc-interactive -t "Hello" -r reference.wav --reftext "What the speaker says in the clip"
 ```
 
 **Option C — activate the venv:**
@@ -56,7 +56,7 @@ oc-interactive/.venv/bin/oc-interactive -t "Hello" -r reference.wav
 ```bash
 cd oc-interactive
 source .venv/bin/activate
-oc-interactive -t "Hello" -r reference.wav
+oc-interactive -t "Hello" -r reference.wav --reftext "What the speaker says in the clip"
 deactivate
 ```
 
@@ -64,8 +64,16 @@ deactivate
 
 ```bash
 cd oc-interactive
-make run ARGS='-t "Hello" -r reference.wav -m ../dots.tts-soar-mlx/4bit'
+make run ARGS='-t "Hello" -r reference.wav --reftext "What the speaker says in the clip" -m ../dots.tts-soar-mlx/4bit'
 ```
+
+**Option E — stdin (omit `-t`):**
+
+```bash
+echo "Hello" | oc-interactive -r reference.wav --reftext "What the speaker says in the clip"
+```
+
+Piped stdin wins over `-t` when both are present.
 
 ## Configuration
 
@@ -102,12 +110,46 @@ export ELLO_GATEWAY_TOKEN=your-token
 ### Multi-turn chat
 
 ```bash
-oc-interactive -t "Hello" -r path/to/reference.wav -m ../dots.tts-soar-mlx
+oc-interactive -t "Hello" -r path/to/reference.wav --reftext "What the speaker says in the clip" -m ../dots.tts-soar-mlx
 oc-interactive -t "Yea, me too. What's up?"
 oc-interactive -t "Well, what do you expect living in the middle of the Pacific?"
 ```
 
-After the first turn, `-r`, `-m`, and `--dots-tts` are optional (cached in `~/.config/oc-interactive/session.json`).
+After the first turn, `-r`, `--reftext`, `-m`, and `--dots-tts` are optional (cached in `~/.config/oc-interactive/session.json`).
+
+### Reference voice
+
+Continuation cloning needs both the reference **audio** and its **transcript**. On the first spoken turn, pass them together:
+
+```bash
+oc-interactive -t "Hello" \
+  -r path/to/reference.wav \
+  --reftext "Exact words spoken in the reference clip"
+```
+
+`--reftext` is required whenever `--refaudio` is set; if you omit `-r` on later turns, any `--reftext` on the command line is ignored and the cached transcript is used.
+
+### Text input
+
+Provide the user message with `-t` / `--text`, or pipe it on stdin:
+
+```bash
+echo "What's the weather?" | oc-interactive
+cat prompt.txt | oc-interactive -v
+```
+
+If both stdin and `-t` are given, **stdin wins** and `-t` is ignored.
+
+### Verbose output
+
+Use `-v` / `--verbose` to print the OpenClaw agent reply to **stdout** after a successful chat turn:
+
+```bash
+oc-interactive -t "Hello" -v
+echo "Hello" | oc-interactive -v
+```
+
+Status and progress messages always go to **stderr**. Errors always go to **stderr** (including agent failures, even with `-v`).
 
 ### Model caching (performance)
 
@@ -138,7 +180,7 @@ Long agent replies (or `/help`) increase `synthMs` proportionally; that is not a
 ### Agent selection
 
 ```bash
-oc-interactive -t "What's in the news?" -r reference.wav --agent news
+oc-interactive -t "What's in the news?" -r reference.wav --reftext "Sample news intro." --agent news
 ```
 
 Permitted agents: `main`, `news`, `eileen` (from config). Default: `main` → `openclaw/main`.
@@ -154,8 +196,8 @@ Permitted agents: `main`, `news`, `eileen` (from config). Default: `main` → `o
 | `/dump`, `/dump all`, `/history` | JSON conversation history on **stdout** (no audio) |
 
 ```bash
-oc-interactive -t "/new" -r reference.wav
-oc-interactive -t $'/system prompt\nYou are concise.\nUse British English.' -r reference.wav
+oc-interactive -t "/new" -r reference.wav --reftext "What the speaker says in the clip"
+oc-interactive -t $'/system prompt\nYou are concise.\nUse British English.' -r reference.wav --reftext "What the speaker says in the clip"
 oc-interactive -t "/history" > conversation.json
 ```
 
@@ -163,11 +205,13 @@ oc-interactive -t "/history" > conversation.json
 
 | Flag | Description |
 |------|-------------|
-| `-t` / `--text` | User message or slash command |
+| `-t` / `--text` | User message or slash command (optional when piping text on stdin) |
 | `-r` / `--refaudio` | Reference audio (required first TTS turn) |
+| `--reftext` | Transcript of the reference clip (required with `--refaudio`; ignored otherwise; cached after first turn) |
 | `-m` / `--model` | dots.tts-soar-mlx model directory |
 | `-l` / `--language` | Parity with dots-tts (agent replies use `EN`) |
 | `-o` / `--output` | Ignored (play-only) |
+| `-v` / `--verbose` | Print successful OpenClaw agent reply to stdout |
 | `--agent` | OpenClaw agent short name |
 | `--openclaw-config` | Path to `openclaw.json` |
 | `--dots-tts` | Path to `dots-tts` binary |
@@ -179,7 +223,7 @@ Under `~/.config/oc-interactive/` (override with `OC_INTERACTIVE_STATE_DIR`):
 
 | File | Purpose |
 |------|---------|
-| `session.json` | Conversation history, system prompt, cached `lastRefaudio` / `lastTtsModel` / `lastDotsTts` |
+| `session.json` | Conversation history, system prompt, cached `lastRefaudio` / `lastReftext` / `lastTtsModel` / `lastDotsTts` |
 | `daemon.sock` | Unix socket IPC |
 | `daemon.pid` | Background daemon PID |
 | `daemon.log` | Background orchestration daemon logs |
@@ -204,11 +248,18 @@ After code changes, restart the orchestration daemon so it picks up the installe
 pkill -f "oc_interactive --daemon"
 ```
 
-## Errors
+## Errors and I/O
 
-Agent failures are spoken as: `Something wrong with the agent, <reason>`.
+All error messages are written to **stderr** and the process exits with a non-zero status.
 
-Unknown slash commands and invalid `--agent` values exit with a non-zero status and a stderr message.
+Agent failures are also spoken as: `Something wrong with the agent, <reason>` (that text is printed to stderr, not stdout).
+
+Unknown slash commands and invalid `--agent` values exit with an error on stderr.
+
+**stdout** is used only for:
+
+- `/dump`, `/history` JSON output
+- `-v` / `--verbose` agent replies on successful chat turns
 
 ## Development
 

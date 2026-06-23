@@ -78,6 +78,7 @@ The daemon listens on a Unix socket at `$OC_INTERACTIVE_STATE_DIR/tts-daemon.soc
 {
   "text": "[EN]Hello world.",
   "refaudio": "/path/to/reference.wav",
+  "reftext": "What the speaker says in the reference clip",
   "model": "/path/to/dots.tts-soar-mlx/4bit",
   "language": "EN",
   "output": "/tmp/out.wav",
@@ -97,6 +98,7 @@ The daemon listens on a Unix socket at `$OC_INTERACTIVE_STATE_DIR/tts-daemon.soc
 }
 ```
 
+- `reftext` — optional transcript for continuation cloning; when set, overrides sidecar `{refaudio}.txt` / `.json`. `oc-interactive` passes this from `--reftext`.
 - `modelReloaded` / `refaudioReloaded` — `true` when the MLX pipeline or reference clip was (re)loaded; `false` on cache hits.
 - `loadMs` — time spent loading model/reference before synthesis.
 - `synthMs` — synthesis time for the request.

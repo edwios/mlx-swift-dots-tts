@@ -84,6 +84,12 @@ mkdir -p ~/.config/oc-interactive
 cp config/openclaw.example.json ~/.config/oc-interactive/openclaw.json
 ```
 
+Override the config path with `-c` / `--config` (default: `~/.config/oc-interactive/openclaw.json`):
+
+```bash
+oc-interactive -c /path/to/openclaw.json -t "Hello" -r reference.wav --reftext "transcript"
+```
+
 Edit paths as needed. Example:
 
 ```json
@@ -213,7 +219,7 @@ oc-interactive -t "/history" > conversation.json
 | `-o` / `--output` | Ignored (play-only) |
 | `-v` / `--verbose` | Print successful OpenClaw agent reply to stdout |
 | `--agent` | OpenClaw agent short name |
-| `--openclaw-config` | Path to `openclaw.json` |
+| `-c` / `--config` | Path to `openclaw.json` (default: `~/.config/oc-interactive/openclaw.json`; `--openclaw-config` is an alias) |
 | `--dots-tts` | Path to `dots-tts` binary |
 | `--debug` | Log OpenClaw/TTS timing and cache status (`OC_INTERACTIVE_DEBUG=1`) |
 

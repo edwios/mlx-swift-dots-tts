@@ -96,9 +96,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="OpenClaw agent short name (main, news, eileen). Default from config.",
     )
     p.add_argument(
+        "-c",
+        "--config",
         "--openclaw-config",
+        dest="openclaw_config",
         default=str(default_config_path()),
-        help="Path to openclaw.json gateway config.",
+        metavar="PATH",
+        help=f"Path to openclaw.json gateway config (default: {default_config_path()}).",
     )
     p.add_argument(
         "--dots-tts",

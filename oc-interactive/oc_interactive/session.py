@@ -27,6 +27,7 @@ class Session:
     system_prompt: str | None = None
     last_agent: str | None = None
     last_refaudio: str | None = None
+    last_reftext: str | None = None
     last_tts_model: str | None = None
     last_dots_tts: str | None = None
     messages: list[dict[str, Any]] = field(default_factory=list)
@@ -38,6 +39,7 @@ class Session:
             system_prompt=data.get("systemPrompt") or None,
             last_agent=data.get("lastAgent"),
             last_refaudio=data.get("lastRefaudio"),
+            last_reftext=data.get("lastReftext"),
             last_tts_model=data.get("lastTtsModel"),
             last_dots_tts=data.get("lastDotsTts"),
             messages=list(data.get("messages") or []),
@@ -54,6 +56,8 @@ class Session:
             out["lastAgent"] = self.last_agent
         if self.last_refaudio:
             out["lastRefaudio"] = self.last_refaudio
+        if self.last_reftext:
+            out["lastReftext"] = self.last_reftext
         if self.last_tts_model:
             out["lastTtsModel"] = self.last_tts_model
         if self.last_dots_tts:
@@ -102,6 +106,7 @@ def new_session(*, keep_system_prompt: bool = True) -> Session:
         system_prompt=current.system_prompt if keep_system_prompt else None,
         last_agent=current.last_agent,
         last_refaudio=current.last_refaudio,
+        last_reftext=current.last_reftext,
         last_tts_model=current.last_tts_model,
         last_dots_tts=current.last_dots_tts,
         messages=[],

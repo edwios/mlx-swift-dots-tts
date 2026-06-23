@@ -15,12 +15,14 @@ struct TTSSynthMetrics: Codable, Sendable {
 final class TTSSession {
     private var cachedModelPath: String?
     private var cachedRefaudioPath: String?
+    private var cachedRefTranscript: String?
     private var pipeline: DotsTTSPipeline?
     private var reference: ReferenceSample.Loaded?
 
     func synthesize(
         text: String,
         refaudioURL: URL,
+        refTranscript: String?,
         modelURL: URL,
         language: String?,
         outputURL: URL,
@@ -46,12 +48,18 @@ final class TTSSession {
             MLX.Memory.cacheLimit = 4 * 1024 * 1024 * 1024
         }
 
-        if reference == nil || cachedRefaudioPath != refPath {
+        let transcriptKey = refTranscript?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if reference == nil || cachedRefaudioPath != refPath || cachedRefTranscript != transcriptKey {
             if debug {
                 fputs("[dots-tts-daemon] loading reference audio: \(refPath)\n", stderr)
             }
-            reference = try ReferenceSample.load(path: refaudioURL)
+            reference = try ReferenceSample.load(
+                path: refaudioURL,
+                transcriptOverride: refTranscript
+            )
             cachedRefaudioPath = refPath
+            cachedRefTranscript = transcriptKey
             refaudioReloaded = true
         }
 

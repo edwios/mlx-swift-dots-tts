@@ -40,6 +40,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Reference audio for voice cloning (required on first TTS turn).",
     )
     p.add_argument(
+        "--reftext",
+        help="Transcript of the reference audio (required with --refaudio; ignored otherwise).",
+    )
+    p.add_argument(
         "-l",
         "--language",
         help="Language tag (parity with dots-tts; agent replies use EN).",
@@ -87,14 +91,22 @@ def _build_parser() -> argparse.ArgumentParser:
 def _resolve_paths(
     args: argparse.Namespace,
     cfg,
-) -> tuple[str, str, Path]:
+) -> tuple[str, str | None, str, Path]:
     session = load_session()
 
     refaudio = args.refaudio
+    # --reftext is only honored together with --refaudio; otherwise ignored.
     if refaudio:
         refaudio = str(Path(refaudio).expanduser().resolve())
+        reftext_arg = (args.reftext or "").strip()
+        if not reftext_arg:
+            raise SystemExit(
+                "error: --reftext is required when --refaudio is provided"
+            )
+        reftext = reftext_arg
     elif session.last_refaudio:
         refaudio = session.last_refaudio
+        reftext = session.last_reftext
     else:
         raise SystemExit(
             "error: --refaudio is required on the first turn (no cached reference audio)"
@@ -121,7 +133,7 @@ def _resolve_paths(
             Path(__file__).resolve().parent.parent.parent / "app" / ".build" / "dots-tts"
         ).resolve()
 
-    return refaudio, tts_model, dots_path
+    return refaudio, reftext, tts_model, dots_path
 
 
 def _handle_dump(agent: str) -> int:
@@ -169,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Spoken commands and chat need refaudio/model/dots-tts
     try:
-        refaudio, tts_model, dots_path = _resolve_paths(args, cfg)
+        refaudio, reftext, tts_model, dots_path = _resolve_paths(args, cfg)
     except SystemExit as e:
         print(str(e), file=sys.stderr)
         return 1
@@ -184,6 +196,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = {
         "text": text,
         "refaudio": refaudio,
+        "reftext": reftext,
         "ttsModel": tts_model,
         "agent": agent,
         "openclawConfig": str(config_path),

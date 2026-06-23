@@ -117,6 +117,11 @@ def _process_request(req: dict[str, Any]) -> None:
     text = str(req.get("text", ""))
     agent_name = str(req.get("agent", "main"))
     refaudio = str(req.get("refaudio", ""))
+    reftext = req.get("reftext")
+    if isinstance(reftext, str):
+        reftext = reftext.strip() or None
+    else:
+        reftext = None
     tts_model = str(req.get("ttsModel", ""))
     config_path = Path(str(req.get("openclawConfig", "")))
     dots_tts_bin = Path(str(req.get("dotsTtsBinary", "")))
@@ -143,6 +148,7 @@ def _process_request(req: dict[str, Any]) -> None:
             slash,
             agent=agent,
             refaudio=refaudio,
+            reftext=reftext,
             tts_model=tts_model,
             dots_tts_bin=dots_tts_bin,
             debug=debug,
@@ -156,6 +162,7 @@ def _process_request(req: dict[str, Any]) -> None:
         agent=agent,
         openclaw_model=openclaw_model,
         refaudio=refaudio,
+        reftext=reftext,
         tts_model=tts_model,
         dots_tts_bin=dots_tts_bin,
         debug=debug,
@@ -166,11 +173,13 @@ def _cache_tts_paths(
     session: Session,
     *,
     refaudio: str,
+    reftext: str | None,
     tts_model: str,
     agent: str,
     dots_tts_bin: Path,
 ) -> None:
     session.last_refaudio = refaudio
+    session.last_reftext = reftext
     session.last_tts_model = tts_model
     session.last_agent = agent
     session.last_dots_tts = str(dots_tts_bin)
@@ -182,6 +191,7 @@ def _handle_slash(
     *,
     agent: str,
     refaudio: str,
+    reftext: str | None,
     tts_model: str,
     dots_tts_bin: Path,
     debug: bool,
@@ -190,7 +200,7 @@ def _handle_slash(
 
     if slash.kind == SlashKind.UNKNOWN:
         spoken = agent_error_line(f"unknown command {slash.raw_verb!r}")
-        _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
+        _speak(spoken, refaudio=refaudio, reftext=reftext, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
         raise ValueError(spoken)
 
     if slash.kind == SlashKind.NEW_SESSION:
@@ -198,13 +208,14 @@ def _handle_slash(
         _cache_tts_paths(
             session,
             refaudio=refaudio,
+            reftext=reftext,
             tts_model=tts_model,
             agent=agent,
             dots_tts_bin=dots_tts_bin,
         )
         spoken = confirmation_text(slash)
         print(f"[oc-interactive] new session {session.user_id}", file=sys.stderr)
-        _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
+        _speak(spoken, refaudio=refaudio, reftext=reftext, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
         return
 
     if slash.kind == SlashKind.SET_SYSTEM_PROMPT:
@@ -212,6 +223,7 @@ def _handle_slash(
         _cache_tts_paths(
             session,
             refaudio=refaudio,
+            reftext=reftext,
             tts_model=tts_model,
             agent=agent,
             dots_tts_bin=dots_tts_bin,
@@ -221,19 +233,20 @@ def _handle_slash(
             f"[oc-interactive] system prompt {'set' if slash.value else 'cleared'}",
             file=sys.stderr,
         )
-        _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
+        _speak(spoken, refaudio=refaudio, reftext=reftext, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
         return
 
     if slash.kind == SlashKind.HELP:
         _cache_tts_paths(
             session,
             refaudio=refaudio,
+            reftext=reftext,
             tts_model=tts_model,
             agent=agent,
             dots_tts_bin=dots_tts_bin,
         )
         spoken = confirmation_text(slash)
-        _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
+        _speak(spoken, refaudio=refaudio, reftext=reftext, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
         return
 
     if slash.kind == SlashKind.STATUS:
@@ -251,11 +264,12 @@ def _handle_slash(
         _cache_tts_paths(
             session,
             refaudio=refaudio,
+            reftext=reftext,
             tts_model=tts_model,
             agent=agent,
             dots_tts_bin=dots_tts_bin,
         )
-        _speak(spoken, refaudio=refaudio, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
+        _speak(spoken, refaudio=refaudio, reftext=reftext, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
         return
 
     raise ValueError(f"unhandled slash command: {slash.kind}")
@@ -269,12 +283,14 @@ def _handle_chat(
     agent: str,
     openclaw_model: str,
     refaudio: str,
+    reftext: str | None,
     tts_model: str,
     dots_tts_bin: Path,
     debug: bool,
 ) -> None:
     session = load_session()
     session.last_refaudio = refaudio
+    session.last_reftext = reftext
     session.last_tts_model = tts_model
     session.last_agent = agent
     session.last_dots_tts = str(dots_tts_bin)
@@ -312,6 +328,7 @@ def _handle_chat(
     _speak(
         spoken,
         refaudio=refaudio,
+        reftext=reftext,
         tts_model=tts_model,
         dots_tts_bin=dots_tts_bin,
         debug=debug,
@@ -322,6 +339,7 @@ def _speak(
     text: str,
     *,
     refaudio: str,
+    reftext: str | None,
     tts_model: str,
     dots_tts_bin: Path,
     debug: bool,
@@ -330,6 +348,7 @@ def _speak(
         synthesize_and_play(
             text,
             refaudio=refaudio,
+            reftext=reftext,
             model=tts_model,
             dots_tts_bin=dots_tts_bin,
             debug=debug,

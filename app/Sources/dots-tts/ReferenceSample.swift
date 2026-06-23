@@ -22,9 +22,10 @@ enum ReferenceSample {
     }
 
     /// Load reference audio from a WAV/AIFF/etc. file or a safetensors fixture.
-    /// Transcript is read from a sidecar `{stem}.txt` or `{stem}.json` (`transcript`
-    /// field) when present; otherwise an empty transcript selects timbre-only cloning.
-    static func load(path: URL) throws -> Loaded {
+    /// Transcript comes from `transcriptOverride` when non-empty; otherwise a sidecar
+    /// `{stem}.txt` or `{stem}.json` (`transcript` field) when present; otherwise an
+    /// empty transcript selects timbre-only cloning.
+    static func load(path: URL, transcriptOverride: String? = nil) throws -> Loaded {
         let ext = path.pathExtension.lowercased()
         let audio: MLXArray
         switch ext {
@@ -40,7 +41,15 @@ enum ReferenceSample {
                 "unsupported reference sample \(path.path); use WAV or safetensors"
             )
         }
-        return Loaded(audio48k: audio, transcript: try loadTranscript(for: path))
+        let transcript: String
+        if let override = transcriptOverride?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !override.isEmpty
+        {
+            transcript = override
+        } else {
+            transcript = try loadTranscript(for: path)
+        }
+        return Loaded(audio48k: audio, transcript: transcript)
     }
 
     private static func loadTranscript(for samplePath: URL) throws -> String {

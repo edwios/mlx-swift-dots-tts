@@ -20,6 +20,7 @@ def synthesize_and_play(
     text: str,
     *,
     refaudio: str,
+    reftext: str | None,
     model: str,
     dots_tts_bin: Path,
     language: str = "EN",
@@ -42,6 +43,7 @@ def synthesize_and_play(
         resp = synthesize_to_wav(
             text=tagged,
             refaudio=refaudio,
+            reftext=reftext,
             model=model,
             output=wav_path,
             dots_tts_bin=dots_tts_bin,

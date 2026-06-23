@@ -122,6 +122,7 @@ def synthesize_to_wav(
     *,
     text: str,
     refaudio: str,
+    reftext: str | None,
     model: str,
     output: Path,
     dots_tts_bin: Path,
@@ -137,6 +138,8 @@ def synthesize_to_wav(
         "output": str(output),
         "debug": debug,
     }
+    if reftext:
+        payload["reftext"] = reftext
     return send_json(
         str(tts_daemon_sock_path()),
         payload,

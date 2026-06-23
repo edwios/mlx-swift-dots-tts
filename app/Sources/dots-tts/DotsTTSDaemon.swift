@@ -4,6 +4,7 @@ import Darwin
 struct TTSDaemonRequest: Codable {
     var text: String
     var refaudio: String
+    var reftext: String?
     var model: String
     var language: String?
     var output: String
@@ -111,6 +112,7 @@ enum DotsTTSDaemon {
         let metrics = try await session.synthesize(
             text: request.text,
             refaudioURL: refaudioURL,
+            refTranscript: request.reftext,
             modelURL: modelURL,
             language: request.language,
             outputURL: outputURL,

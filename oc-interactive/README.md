@@ -121,7 +121,7 @@ oc-interactive -t "Yea, me too. What's up?"
 oc-interactive -t "Well, what do you expect living in the middle of the Pacific?"
 ```
 
-After the first turn, `-r`, `--reftext`, `-m`, and `--dots-tts` are optional (cached in `~/.config/oc-interactive/session.json`).
+After the first turn, `-r`, `--reftext`, `-m`, `-c` / `--config`, and `--dots-tts` are optional (cached in `~/.config/oc-interactive/session.json`).
 
 ### Reference voice
 
@@ -219,7 +219,7 @@ oc-interactive -t "/history" > conversation.json
 | `-o` / `--output` | Ignored (play-only) |
 | `-v` / `--verbose` | Print successful OpenClaw agent reply to stdout |
 | `--agent` | OpenClaw agent short name |
-| `-c` / `--config` | Path to `openclaw.json` (default: `~/.config/oc-interactive/openclaw.json`; `--openclaw-config` is an alias) |
+| `-c` / `--config` | Path to `openclaw.json` (default: `~/.config/oc-interactive/openclaw.json`; cached after first turn; `--openclaw-config` is an alias) |
 | `--dots-tts` | Path to `dots-tts` binary |
 | `--debug` | Log OpenClaw/TTS timing and cache status (`OC_INTERACTIVE_DEBUG=1`) |
 
@@ -229,7 +229,7 @@ Under `~/.config/oc-interactive/` (override with `OC_INTERACTIVE_STATE_DIR`):
 
 | File | Purpose |
 |------|---------|
-| `session.json` | Conversation history, system prompt, cached `lastRefaudio` / `lastReftext` / `lastTtsModel` / `lastDotsTts` |
+| `session.json` | Conversation history, system prompt, cached `lastRefaudio` / `lastReftext` / `lastTtsModel` / `lastDotsTts` / `lastOpenclawConfig` |
 | `daemon.sock` | Unix socket IPC |
 | `daemon.pid` | Background daemon PID |
 | `daemon.log` | Background orchestration daemon logs |

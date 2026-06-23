@@ -100,9 +100,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--config",
         "--openclaw-config",
         dest="openclaw_config",
-        default=str(default_config_path()),
+        default=None,
         metavar="PATH",
-        help=f"Path to openclaw.json gateway config (default: {default_config_path()}).",
+        help=f"Path to openclaw.json gateway config (default: {default_config_path()}; "
+        "cached after first turn).",
     )
     p.add_argument(
         "--dots-tts",
@@ -175,6 +176,15 @@ def _resolve_paths(
     return refaudio, reftext, tts_model, dots_path
 
 
+def _resolve_config_path(args: argparse.Namespace) -> Path:
+    session = load_session()
+    if args.openclaw_config:
+        return Path(args.openclaw_config).expanduser().resolve()
+    if session.last_openclaw_config:
+        return Path(session.last_openclaw_config)
+    return default_config_path()
+
+
 def _handle_dump(agent: str) -> int:
     session = load_session()
     doc = session.dump_document(agent=agent)
@@ -207,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
             dump_agent = args.agent or session.last_agent or "main"
             return _handle_dump(dump_agent)
 
-    config_path = Path(args.openclaw_config).expanduser().resolve()
+    config_path = _resolve_config_path(args)
     try:
         cfg = load_config(config_path)
     except (FileNotFoundError, ValueError) as e:

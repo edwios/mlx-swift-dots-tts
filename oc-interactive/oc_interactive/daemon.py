@@ -156,6 +156,7 @@ def _process_request(req: dict[str, Any]) -> RequestResult:
         _handle_slash(
             slash,
             agent=agent,
+            openclaw_config=str(config_path),
             refaudio=refaudio,
             reftext=reftext,
             tts_model=tts_model,
@@ -170,6 +171,7 @@ def _process_request(req: dict[str, Any]) -> RequestResult:
         token=token,
         agent=agent,
         openclaw_model=openclaw_model,
+        openclaw_config=str(config_path),
         refaudio=refaudio,
         reftext=reftext,
         tts_model=tts_model,
@@ -181,12 +183,14 @@ def _process_request(req: dict[str, Any]) -> RequestResult:
 def _cache_tts_paths(
     session: Session,
     *,
+    openclaw_config: str,
     refaudio: str,
     reftext: str | None,
     tts_model: str,
     agent: str,
     dots_tts_bin: Path,
 ) -> None:
+    session.last_openclaw_config = openclaw_config
     session.last_refaudio = refaudio
     session.last_reftext = reftext
     session.last_tts_model = tts_model
@@ -199,6 +203,7 @@ def _handle_slash(
     slash,
     *,
     agent: str,
+    openclaw_config: str,
     refaudio: str,
     reftext: str | None,
     tts_model: str,
@@ -216,6 +221,7 @@ def _handle_slash(
         session = new_session(keep_system_prompt=True)
         _cache_tts_paths(
             session,
+            openclaw_config=openclaw_config,
             refaudio=refaudio,
             reftext=reftext,
             tts_model=tts_model,
@@ -231,6 +237,7 @@ def _handle_slash(
         session.system_prompt = slash.value or None
         _cache_tts_paths(
             session,
+            openclaw_config=openclaw_config,
             refaudio=refaudio,
             reftext=reftext,
             tts_model=tts_model,
@@ -247,6 +254,7 @@ def _handle_slash(
     if slash.kind == SlashKind.HELP:
         _cache_tts_paths(
             session,
+            openclaw_config=openclaw_config,
             refaudio=refaudio,
             reftext=reftext,
             tts_model=tts_model,
@@ -270,6 +278,7 @@ def _handle_slash(
         )
         _cache_tts_paths(
             session,
+            openclaw_config=openclaw_config,
             refaudio=refaudio,
             reftext=reftext,
             tts_model=tts_model,
@@ -289,6 +298,7 @@ def _handle_chat(
     token: str,
     agent: str,
     openclaw_model: str,
+    openclaw_config: str,
     refaudio: str,
     reftext: str | None,
     tts_model: str,
@@ -296,6 +306,7 @@ def _handle_chat(
     debug: bool,
 ) -> RequestResult:
     session = load_session()
+    session.last_openclaw_config = openclaw_config
     session.last_refaudio = refaudio
     session.last_reftext = reftext
     session.last_tts_model = tts_model

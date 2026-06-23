@@ -1,0 +1,16 @@
+{
+  "openclawBaseURL": "http://127.0.0.1:18789",
+  "openclawToken": "$ELLO_GATEWAY_TOKEN",
+  "defaultAgent": "main",
+  "agents": ["main", "news", "eileen"],
+  "dotsTtsBinary": "../app/.build/dots-tts",
+  "ssh": {
+    "enabled": true,
+    "host": "ello.local",
+    "user": "fsoc4",
+    "identityFile": "~/.ssh/id_ed25519",
+    "localPort": 18789,
+    "remoteHost": "127.0.0.1",
+    "remotePort": 18789
+  }
+}

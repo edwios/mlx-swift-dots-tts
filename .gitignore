@@ -9,3 +9,11 @@ dots.tts-soar-mlx
 *.safetensors
 *.npz
 .claude/
+# Python oc-interactive
+oc-interactive/.venv/
+oc-interactive/**/__pycache__/
+oc-interactive/**/*.egg-info/
+oc-interactive/.eggs/
+oc-interactive/.verify-state/
+oc-interactive/.verify-config.json
+oc-interactive/.DS_Store

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Run oc-interactive from the repo without activating the venv or adding to PATH.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+BIN="$ROOT/.venv/bin/oc-interactive"
+if [[ ! -x "$BIN" ]]; then
+  echo "oc-interactive not installed; run: cd $ROOT && make install" >&2
+  exit 1
+fi
+exec "$BIN" "$@"

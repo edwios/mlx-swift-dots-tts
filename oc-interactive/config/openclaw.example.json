@@ -5,5 +5,7 @@
   "agents": ["main", "news", "eileen"],
   "ttsModel": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
   "ttsSpeaker": "Ryan",
+  "ttsInstruct": null,
+  "ttsLanguage": "English",
   "ttsVoiceDesign": null
 }

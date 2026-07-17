@@ -102,7 +102,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--instruct",
-        help="Emotion/style instruction for CustomVoice (e.g. 'calm and warm').",
+        help="Emotion/style instruction for CustomVoice (e.g. 'calm and warm'). "
+        "Default from config ttsInstruct when omitted.",
     )
     p.add_argument(
         "--voice-design",
@@ -112,7 +113,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "-l",
         "--language",
-        help=f"Language for TTS (default: {DEFAULT_LANGUAGE}).",
+        help=f"Language for TTS (default from config ttsLanguage, else {DEFAULT_LANGUAGE}). "
+        "Qwen3-TTS uses codes like English, Chinese — not regional variants.",
     )
     p.add_argument(
         "-o",
@@ -221,7 +223,7 @@ def _resolve_voice(args: argparse.Namespace, cfg) -> VoiceSettings:
     elif session.last_language:
         language = session.last_language
     else:
-        language = DEFAULT_LANGUAGE
+        language = getattr(cfg, "tts_language", None) or DEFAULT_LANGUAGE
 
     speaker: str | None = None
     instruct: str | None = None
@@ -277,7 +279,10 @@ def _resolve_voice(args: argparse.Namespace, cfg) -> VoiceSettings:
         elif session.last_instruct:
             instruct = session.last_instruct
         else:
-            instruct = None
+            cfg_instruct = getattr(cfg, "tts_instruct", None)
+            instruct = cfg_instruct if isinstance(cfg_instruct, str) else None
+            if instruct is not None:
+                instruct = instruct.strip() or None
 
     return VoiceSettings(
         mode=mode,

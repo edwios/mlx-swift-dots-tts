@@ -89,6 +89,8 @@ Edit paths as needed. Example:
   "agents": ["main", "news", "eileen"],
   "ttsModel": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
   "ttsSpeaker": "Ryan",
+  "ttsInstruct": null,
+  "ttsLanguage": "English",
   "ttsVoiceDesign": null
 }
 ```
@@ -97,6 +99,8 @@ Edit paths as needed. Example:
 - `agents`: allowlist validated against `--agent` (CLI value is prefixed with `openclaw/` automatically).
 - `ttsModel`: Hugging Face model id or local path (default CustomVoice 8-bit). Use a VoiceDesign model when `ttsVoiceDesign` is set.
 - `ttsSpeaker`: default CustomVoice speaker when `--speaker` is omitted.
+- `ttsInstruct`: optional default emotion/style instruction for CustomVoice (used when `--instruct` is omitted).
+- `ttsLanguage`: TTS language code (default `English`). Qwen3-TTS supports language ids such as `English`, `Chinese`, `Japanese`, `Korean`, `German`, `French`, `Spanish`, `Italian`, `Portuguese`, `Russian` — not regional variants like “British English”; put accent/dialect in `ttsInstruct` or `ttsVoiceDesign` instead.
 - `ttsVoiceDesign`: optional natural-language voice description. If set, VoiceDesign mode is used by default. **Takes priority over `ttsSpeaker` when both are defined.**
 - `ssh` block is informational only; start your tunnel separately.
 
@@ -228,12 +232,12 @@ oc-interactive -t "/history" > conversation.json
 |------|-------------|
 | `-t` / `--text` | User message or slash command (optional when piping text on stdin) |
 | `--speaker` | CustomVoice speaker (default `Ryan`) |
-| `--instruct` | Emotion/style instruction for CustomVoice |
+| `--instruct` | Emotion/style instruction for CustomVoice (default from config `ttsInstruct`) |
 | `--voice-design` | Voice description for VoiceDesign mode |
 | `-r` / `--refaudio` | Reference audio for clone mode |
 | `--reftext` | Transcript of the reference clip (required with `--refaudio`) |
 | `-m` / `--model` | mlx-audio Qwen3-TTS model id or local path |
-| `-l` / `--language` | TTS language (default `English`) |
+| `-l` / `--language` | TTS language (default from config `ttsLanguage`, else `English`) |
 | `-o` / `--output` | Ignored (play-only) |
 | `-v` / `--verbose` | Print successful OpenClaw agent reply to stdout |
 | `--agent` | OpenClaw agent short name |

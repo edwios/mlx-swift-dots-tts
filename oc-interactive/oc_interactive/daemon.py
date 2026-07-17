@@ -223,6 +223,7 @@ def _process_request(req: dict[str, Any]) -> RequestResult:
 
     slash = parse_slash_command(text)
     debug = bool(req.get("debug")) or debug_enabled()
+    quiet = bool(req.get("quiet"))
     if slash is not None:
         _handle_slash(
             slash,
@@ -230,6 +231,7 @@ def _process_request(req: dict[str, Any]) -> RequestResult:
             openclaw_config=str(config_path),
             voice=voice,
             debug=debug,
+            quiet=quiet,
         )
         return RequestResult()
 
@@ -242,6 +244,7 @@ def _process_request(req: dict[str, Any]) -> RequestResult:
         openclaw_config=str(config_path),
         voice=voice,
         debug=debug,
+        quiet=quiet,
     )
 
 
@@ -272,12 +275,13 @@ def _handle_slash(
     openclaw_config: str,
     voice: VoiceContext,
     debug: bool,
+    quiet: bool,
 ) -> None:
     session = load_session()
 
     if slash.kind == SlashKind.UNKNOWN:
         spoken = agent_error_line(f"unknown command {slash.raw_verb!r}")
-        _speak(spoken, voice=voice, debug=debug)
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet)
         raise ValueError(spoken)
 
     if slash.kind == SlashKind.NEW_SESSION:
@@ -290,7 +294,7 @@ def _handle_slash(
         )
         spoken = confirmation_text(slash)
         eprint(f"[oc-interactive] new session {session.user_id}")
-        _speak(spoken, voice=voice, debug=debug)
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet)
         return
 
     if slash.kind == SlashKind.SET_SYSTEM_PROMPT:
@@ -305,7 +309,7 @@ def _handle_slash(
         eprint(
             f"[oc-interactive] system prompt {'set' if slash.value else 'cleared'}"
         )
-        _speak(spoken, voice=voice, debug=debug)
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet)
         return
 
     if slash.kind == SlashKind.HELP:
@@ -316,7 +320,7 @@ def _handle_slash(
             agent=agent,
         )
         spoken = confirmation_text(slash)
-        _speak(spoken, voice=voice, debug=debug)
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet)
         return
 
     if slash.kind == SlashKind.STATUS:
@@ -336,7 +340,7 @@ def _handle_slash(
             voice=voice,
             agent=agent,
         )
-        _speak(spoken, voice=voice, debug=debug)
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet)
         return
 
     raise ValueError(f"unhandled slash command: {slash.kind}")
@@ -352,6 +356,7 @@ def _handle_chat(
     openclaw_config: str,
     voice: VoiceContext,
     debug: bool,
+    quiet: bool,
 ) -> RequestResult:
     session = load_session()
     _cache_tts_paths(
@@ -392,8 +397,7 @@ def _handle_chat(
     append_assistant_message(session, spoken_raw, agent=agent)
     save_session(session)
 
-    eprint(f"[oc-interactive] speaking: {spoken_raw[:80]}…")
-    _speak(spoken_raw, voice=voice, debug=debug)
+    _speak(spoken_raw, voice=voice, debug=debug, quiet=quiet)
     if openclaw_failed:
         return RequestResult(error=spoken_raw)
     return RequestResult(reply=spoken_raw)
@@ -404,7 +408,11 @@ def _speak(
     *,
     voice: VoiceContext,
     debug: bool,
+    quiet: bool = False,
 ) -> None:
+    if not quiet:
+        sys.stdout.write(text if text.endswith("\n") else text + "\n")
+        sys.stdout.flush()
     try:
         synthesize_and_play(
             text,

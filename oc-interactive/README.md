@@ -23,9 +23,17 @@ make install
 
 This creates `.venv/`, installs `oc-interactive` plus `mlx-audio[tts]`, and puts the command at `.venv/bin/oc-interactive`.
 
-On first synthesis, mlx-audio downloads the selected Hugging Face model into the HF cache (several GB for 1.7B 8-bit).
-
 ## How to run
+
+**First launch of a model is slow — how slow depends on whether the weights are already on disk:**
+
+| Case | What happens | Typical wait |
+|------|----------------|--------------|
+| **Model not cached yet** | mlx-audio downloads several GB from Hugging Face, then loads into the TTS daemon | Often **many minutes** (network + load) |
+| **Model already on disk** (HF cache or local `-m` path), but daemon has not loaded it yet | Load weights into Metal memory only — no download | Still **slow** (often tens of seconds to a couple of minutes), but much faster than a cold download |
+| **Later turns** (same model, daemon still running) | Synthesis only | Fast |
+
+Switching modes (e.g. CustomVoice → VoiceDesign) can hit either of the first two cases for the other checkpoint. See [Model caching (performance)](#model-caching-performance) for daemon idle reload details.
 
 **Option A — launcher script (easiest, no PATH changes):**
 
@@ -104,6 +112,8 @@ Edit paths as needed. Example:
 - `ttsVoiceDesign`: optional natural-language voice description. If set, VoiceDesign mode is used by default. **Takes priority over `ttsSpeaker` when both are defined.**
 - `ssh` block is informational only; start your tunnel separately.
 
+**CLI options override config.** Values in `openclaw.json` are defaults. Flags such as `--speaker`, `--instruct`, `--voice-design`, `-m` / `--model`, `-l` / `--language`, and `--agent` take precedence for that turn. Successful turns then cache the effective settings in `session.json`, so later turns can omit those flags until you override them again on the CLI.
+
 ```bash
 export ELLO_GATEWAY_TOKEN=your-token
 ```
@@ -175,12 +185,15 @@ cat prompt.txt | oc-interactive -v
 
 If both stdin and `-t` are given, **stdin wins** and `-t` is ignored.
 
-### Verbose output
+### Verbose and quiet output
 
-Use `-v` / `--verbose` to print the OpenClaw agent reply to **stdout** after a successful chat turn:
+By default, the full text sent to TTS is printed to **stdout** before playback. Use `-q` / `--quiet` to suppress that.
+
+Use `-v` / `--verbose` to also print the OpenClaw agent reply to **stdout** after a successful chat turn:
 
 ```bash
 oc-interactive -t "Hello" -v
+oc-interactive -t "Hello" -q
 echo "Hello" | oc-interactive -v
 ```
 
@@ -188,7 +201,14 @@ Status and progress messages always go to **stderr**. Errors always go to **stde
 
 ### Model caching (performance)
 
-Synthesis uses a persistent **Qwen3-TTS daemon** that keeps the mlx-audio model loaded in memory. The first spoken turn pays a one-time model load cost; later turns reuse the cache and only pay synthesis time.
+Synthesis uses a persistent **Qwen3-TTS daemon** that keeps the mlx-audio model loaded in memory. Distinguish **on-disk** cache (Hugging Face / local path) from **in-memory** cache (the running daemon):
+
+| Situation | Download? | Load into daemon? | What you notice |
+|-----------|-----------|-------------------|-----------------|
+| First use, model **not** in HF cache (or new auto-switched checkpoint) | Yes (several GB) | Yes | Longest wait — often many minutes |
+| First use (or after daemon restart), model **already** on disk | No | Yes | Still a noticeable wait for Metal load; no network fetch |
+| Later turns, same model, daemon still up | No | No (`modelReloaded=False`) | Synthesis only — fast |
+| Daemon idle timeout (30 minutes), then next spoken turn | No (if HF cache warm) | Yes once (`modelReloaded=True`) | One-time reload cost, then fast again |
 
 Use `--debug` (or `OC_INTERACTIVE_DEBUG=1`) to print timing in `daemon.log`:
 
@@ -197,10 +217,8 @@ Use `--debug` (or `OC_INTERACTIVE_DEBUG=1`) to print timing in `daemon.log`:
 [oc-interactive] tts-daemon mode=custom_voice modelReloaded=False loadMs=0 synthMs=1100
 ```
 
-- `modelReloaded=True` on the first turn is expected; `False` on subsequent turns confirms caching.
+- `modelReloaded=True` means weights were loaded into the daemon (first use or after idle/restart); `False` means the in-memory cache was reused.
 - OpenClaw round-trip is separate (`openclawMs`) and may be 30–60s depending on the agent.
-
-The TTS daemon idles out after 30 minutes; the next spoken turn reloads the model once.
 
 ### Agent selection
 
@@ -240,6 +258,7 @@ oc-interactive -t "/history" > conversation.json
 | `-l` / `--language` | TTS language (default from config `ttsLanguage`, else `English`) |
 | `-o` / `--output` | Ignored (play-only) |
 | `-v` / `--verbose` | Print successful OpenClaw agent reply to stdout |
+| `-q` / `--quiet` | Do not print the text sent to TTS (full TTS text is printed to stdout by default) |
 | `--agent` | OpenClaw agent short name |
 | `-c` / `--config` | Path to `openclaw.json` (default: `~/.config/oc-interactive/openclaw.json`; cached after first turn; `--openclaw-config` is an alias) |
 | `--timeout SECONDS` | Max seconds to wait for agent reply and TTS (default: no timeout) |
@@ -286,10 +305,13 @@ Agent failures are also spoken as: `Something wrong with the agent, <reason>` (t
 
 Unknown slash commands and invalid `--agent` values exit with an error on stderr.
 
-**stdout** is used only for:
+**stdout** is used for:
 
+- TTS text (unless `-q` / `--quiet`)
 - `/dump`, `/history` JSON output
 - `-v` / `--verbose` agent replies on successful chat turns
+
+Use `-q` / `--quiet` to suppress the default TTS text on stdout.
 
 ## Development
 

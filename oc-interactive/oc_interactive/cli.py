@@ -167,6 +167,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print the OpenClaw agent reply to stdout.",
     )
     p.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        default=False,
+        help="Do not print the text sent to TTS (printed to stdout by default).",
+    )
+    p.add_argument(
         "--daemon",
         action="store_true",
         help=argparse.SUPPRESS,
@@ -466,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
         "openclawConfig": str(config_path),
         "openclawToken": cfg.token,
         "debug": debug_enabled(args.debug),
+        "quiet": bool(args.quiet),
     }
 
     if args.timeout is not None and args.timeout <= 0:

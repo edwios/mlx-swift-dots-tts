@@ -8,7 +8,6 @@ if [[ ! -x "$BIN" ]]; then
   exit 1
 fi
 exec "$BIN" \
-  --speaker Ryan \
-  --instruct "warm, friendly, and conversational" \
+  --instruct "warm, friendly, and conversational with a British accent" \
   -c ello.conf \
   "$@"

@@ -23,6 +23,7 @@ from oc_interactive.slash import (
 from oc_interactive.tts_defaults import (
     DEFAULT_LANGUAGE,
     DEFAULT_MODE,
+    DEFAULT_MODEL_BY_MODE,
     DEFAULT_SPEAKER,
     DEFAULT_TTS_MODEL,
     MODE_CLONE,
@@ -242,26 +243,75 @@ def _resolve_tts_model(args: argparse.Namespace, cfg, session) -> str:
     return cfg.tts_model or DEFAULT_TTS_MODEL
 
 
+def _infer_qwen_model_kind(model: str) -> str | None:
+    """Return MODE_* when the id/path names a known Qwen3-TTS variant."""
+    lower = (model or "").lower().replace("\\", "/")
+    if "voicedesign" in lower or "voice-design" in lower or "voice_design" in lower:
+        return MODE_VOICE_DESIGN
+    if "customvoice" in lower or "custom-voice" in lower or "custom_voice" in lower:
+        return MODE_CUSTOM_VOICE
+    # Base clone models: require "base" but not the other variant names.
+    if "base" in lower and "qwen3-tts" in lower:
+        return MODE_CLONE
+    if "/base" in lower or lower.endswith("-base") or lower.endswith("-base-8bit") or lower.endswith("-base-bf16"):
+        return MODE_CLONE
+    return None
+
+
+def _ensure_model_matches_mode(
+    model: str,
+    mode: str,
+    *,
+    explicit_cli_model: bool,
+) -> str:
+    """If mode and checkpoint disagree, pick the default HF id for that mode.
+
+    Explicit ``-m`` is left alone (caller gets a clear mlx-audio error). Otherwise
+    mlx-audio will download the matching VoiceDesign / CustomVoice / Base weights.
+    """
+    kind = _infer_qwen_model_kind(model)
+    if kind == mode:
+        return model
+    if explicit_cli_model:
+        return model
+    default = DEFAULT_MODEL_BY_MODE.get(mode)
+    if not default:
+        return model
+    if kind is None or kind != mode:
+        return default
+    return model
+
+
 def _resolve_voice(args: argparse.Namespace, cfg) -> VoiceSettings:
     session = load_session()
     cfg_voice_design = getattr(cfg, "tts_voice_design", None)
 
-    # Mode: explicit CLI flags win; otherwise restore from session / config.
-    # Config: ttsVoiceDesign takes priority over ttsSpeaker when both are set.
+    # Mode: explicit CLI flags win; otherwise config VoiceDesign beats session
+    # (ttsVoiceDesign takes priority over ttsSpeaker / cached custom_voice).
     if args.voice_design:
         mode = MODE_VOICE_DESIGN
     elif args.refaudio:
         mode = MODE_CLONE
     elif args.speaker is not None or args.instruct is not None:
         mode = MODE_CUSTOM_VOICE
-    elif session.last_voice_mode:
-        mode = session.last_voice_mode
     elif cfg_voice_design:
         mode = MODE_VOICE_DESIGN
+    elif session.last_voice_mode:
+        mode = session.last_voice_mode
     else:
         mode = DEFAULT_MODE
 
-    tts_model = _resolve_tts_model(args, cfg, session)
+    resolved = _resolve_tts_model(args, cfg, session)
+    tts_model = _ensure_model_matches_mode(
+        resolved,
+        mode,
+        explicit_cli_model=bool(args.model),
+    )
+    if tts_model != resolved:
+        eprint(
+            f"[oc-interactive] mode={mode} needs a matching checkpoint; "
+            f"using {tts_model} (downloaded on first use if missing)"
+        )
 
     if args.language:
         language = args.language

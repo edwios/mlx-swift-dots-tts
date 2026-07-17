@@ -114,7 +114,7 @@ export ELLO_GATEWAY_TOKEN=your-token
 |------|---------------|--------------|-------|
 | **CustomVoice** (default) | `--speaker` + optional `--instruct`, or config `ttsSpeaker` | CustomVoice | Emotion/style via natural language |
 | **Clone** | `--refaudio` + `--reftext` | Base | Zero-shot voice cloning |
-| **VoiceDesign** | `--voice-design "..."` or config `ttsVoiceDesign` | VoiceDesign | Create a voice from a description; config key wins over `ttsSpeaker` if both are set |
+| **VoiceDesign** | `--voice-design "..."` or config `ttsVoiceDesign` | VoiceDesign | Create a voice from a description; config key wins over `ttsSpeaker` if both are set. If `ttsModel` is still a CustomVoice/Base id, oc-interactive auto-switches to the VoiceDesign HF default (downloaded on first use). |
 
 Suggested models:
 

@@ -27,9 +27,9 @@ from oc_interactive.session import (
     Session,
     append_assistant_message,
     append_user_message,
+    archive_and_new_session,
     build_api_messages,
     load_session,
-    new_session,
     save_session,
 )
 from oc_interactive.slash import (
@@ -285,7 +285,7 @@ def _handle_slash(
         raise ValueError(spoken)
 
     if slash.kind == SlashKind.NEW_SESSION:
-        session = new_session(keep_system_prompt=True)
+        session, archived = archive_and_new_session(keep_system_prompt=True)
         _cache_tts_paths(
             session,
             openclaw_config=openclaw_config,
@@ -293,6 +293,8 @@ def _handle_slash(
             agent=agent,
         )
         spoken = confirmation_text(slash)
+        if archived:
+            eprint(f"[oc-interactive] archived session → {archived}")
         eprint(f"[oc-interactive] new session {session.user_id}")
         _speak(spoken, voice=voice, debug=debug, quiet=quiet)
         return

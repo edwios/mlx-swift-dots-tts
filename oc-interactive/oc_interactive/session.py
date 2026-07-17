@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from oc_interactive.paths import ensure_state_dir, session_path
+from oc_interactive.paths import ensure_state_dir, session_path, sessions_dir
 
 
 def _utc_now() -> str:
@@ -136,6 +136,58 @@ def new_session(*, keep_system_prompt: bool = True) -> Session:
         last_openclaw_config=current.last_openclaw_config,
         messages=[],
     )
+
+
+def archive_current_session(session: Session | None = None) -> Path | None:
+    """Write the current session under sessions/ if it has messages.
+
+    Returns the archive path, or None when there was nothing to archive.
+    """
+    current = session or load_session()
+    if not current.messages:
+        return None
+
+    ensure_state_dir()
+    archive_root = sessions_dir()
+    archive_root.mkdir(parents=True, exist_ok=True)
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    safe_id = current.user_id.replace(":", "_").replace("/", "_")
+    dest = archive_root / f"{stamp}_{safe_id}.json"
+    payload = json.dumps(current.to_dict(), indent=2, ensure_ascii=False) + "\n"
+    tmp = dest.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        f.write(payload)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, dest)
+    return dest
+
+
+def archive_and_new_session(*, keep_system_prompt: bool = True) -> tuple[Session, Path | None]:
+    """Archive the current session (if it has messages) and start a new one."""
+    current = load_session()
+    archived = archive_current_session(current)
+    session = new_session(keep_system_prompt=keep_system_prompt)
+    save_session(session)
+    return session, archived
+
+
+def clear_cached_settings(session: Session | None = None) -> Session:
+    """Drop cached voice/agent/config paths; keep conversation and system prompt."""
+    s = session or load_session()
+    s.last_agent = None
+    s.last_refaudio = None
+    s.last_reftext = None
+    s.last_tts_model = None
+    s.last_speaker = None
+    s.last_instruct = None
+    s.last_voice_mode = None
+    s.last_voice_design = None
+    s.last_language = None
+    s.last_openclaw_config = None
+    save_session(s)
+    return s
 
 
 def append_user_message(session: Session, content: str) -> None:

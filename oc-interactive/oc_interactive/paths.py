@@ -10,6 +10,7 @@ DAEMON_SOCK = "daemon.sock"
 DAEMON_PID = "daemon.pid"
 DAEMON_LOG = "daemon.log"
 SESSION_FILE = "session.json"
+SESSIONS_DIR = "sessions"
 TTS_DAEMON_SOCK = "tts-daemon.sock"
 TTS_DAEMON_PID = "tts-daemon.pid"
 TTS_DAEMON_LOG = "tts-daemon.log"
@@ -40,6 +41,10 @@ def daemon_log_path() -> Path:
 
 def session_path() -> Path:
     return state_dir() / SESSION_FILE
+
+
+def sessions_dir() -> Path:
+    return state_dir() / SESSIONS_DIR
 
 
 def tts_daemon_sock_path() -> Path:

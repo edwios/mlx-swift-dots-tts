@@ -14,7 +14,11 @@ from oc_interactive.config import load_config
 from oc_interactive.daemon import main as daemon_main
 from oc_interactive.io import CliError, eprint
 from oc_interactive.paths import default_config_path, debug_enabled
-from oc_interactive.session import load_session
+from oc_interactive.session import (
+    archive_and_new_session,
+    clear_cached_settings,
+    load_session,
+)
 from oc_interactive.slash import (
     is_dump_command,
     is_slash_command,
@@ -145,6 +149,25 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help=f"Path to oc-interactive.json gateway config (default: {default_config_path()}; "
         "cached after first turn).",
+    )
+    p.add_argument(
+        "--init",
+        action="store_true",
+        help=(
+            "Forget cached voice/agent/config settings and reload defaults from "
+            f"{default_config_path()} (or -c/--config if given). "
+            "Can be used alone or with a turn."
+        ),
+    )
+    p.add_argument(
+        "--new",
+        action="store_true",
+        help=(
+            "Archive the current session (if it has messages) under "
+            "~/.config/oc-interactive/sessions/ and start a new one. "
+            "Keeps system prompt and cached voice settings. "
+            "Can be used alone or with a turn."
+        ),
     )
     p.add_argument(
         "--timeout",
@@ -433,7 +456,34 @@ def main(argv: list[str] | None = None) -> int:
 
         return tts_daemon_main()
 
-    text = _resolve_text(args, parser)
+    if args.new:
+        session, archived = archive_and_new_session(keep_system_prompt=True)
+        if archived:
+            eprint(f"[oc-interactive] archived session → {archived}")
+        else:
+            eprint("[oc-interactive] no messages to archive")
+        eprint(f"[oc-interactive] new session {session.user_id}")
+
+    if args.init:
+        clear_cached_settings()
+        eprint(
+            "[oc-interactive] cleared cached settings; "
+            f"defaults from {_resolve_config_path(args)}"
+        )
+
+    stdin_text = _read_stdin_text()
+    # Allow `oc-interactive --new` / `--init` with no turn text.
+    if (args.new or args.init) and args.text is None and stdin_text is None:
+        return 0
+
+    if stdin_text is not None:
+        text = stdin_text
+    elif args.text:
+        text = args.text
+    else:
+        parser.error("text is required via stdin or -t/--text")
+    if not text:
+        parser.error("text is required via stdin or -t/--text")
 
     if is_slash_command(text):
         slash = parse_slash_command(text)

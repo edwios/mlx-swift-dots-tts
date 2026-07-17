@@ -114,6 +114,28 @@ Edit paths as needed. Example:
 
 **CLI options override config.** Values in `oc-interactive.json` are defaults. Flags such as `--speaker`, `--instruct`, `--voice-design`, `-m` / `--model`, `-l` / `--language`, and `--agent` take precedence for that turn. Successful turns then cache the effective settings in `session.json`, so later turns can omit those flags until you override them again on the CLI.
 
+To discard the session cache and reload from the config file (default `~/.config/oc-interactive/oc-interactive.json`, or `-c` if given):
+
+```bash
+oc-interactive --init
+# or reset and speak in one turn:
+oc-interactive --init -t "Hello"
+```
+
+Conversation history and the system prompt are kept; only cached voice/agent/config paths are cleared.
+
+To archive the current conversation and start a fresh session (keeps system prompt and voice settings):
+
+```bash
+oc-interactive --new
+# reset voice defaults and start a new session:
+oc-interactive --new --init
+# archive, then speak the first turn of the new session:
+oc-interactive --new -t "Hello"
+```
+
+Archives are written to `~/.config/oc-interactive/sessions/` when the current session has messages.
+
 ```bash
 export ELLO_GATEWAY_TOKEN=your-token
 ```
@@ -232,7 +254,7 @@ Permitted agents: `main`, `news`, `eileen` (from config). Default: `main` → `o
 
 | Command | Effect |
 |---------|--------|
-| `/new`, `/clear`, `/clean all` | New session (clears message history; keeps system prompt) |
+| `/new`, `/clear`, `/clean all` | New session (archives current if it has messages; clears history; keeps system prompt) |
 | `/system prompt …` | Set multi-line system prompt (empty clears it) |
 | `/help` | Spoken command summary |
 | `/status` | Spoken session summary |
@@ -261,6 +283,8 @@ oc-interactive -t "/history" > conversation.json
 | `-q` / `--quiet` | Do not print the text sent to TTS (full TTS text is printed to stdout by default) |
 | `--agent` | OpenClaw agent short name |
 | `-c` / `--config` | Path to `oc-interactive.json` (default: `~/.config/oc-interactive/oc-interactive.json`; cached after first turn) |
+| `--init` | Forget cached voice/agent/config settings and reload defaults from the config file (alone or with a turn) |
+| `--new` | Archive the current session under `sessions/` (if it has messages) and start a new one; keeps system prompt and voice cache (alone or with a turn) |
 | `--timeout SECONDS` | Max seconds to wait for agent reply and TTS (default: no timeout) |
 | `--debug` | Log OpenClaw/TTS timing and cache status (`OC_INTERACTIVE_DEBUG=1`) |
 
@@ -271,6 +295,7 @@ Under `~/.config/oc-interactive/` (override with `OC_INTERACTIVE_STATE_DIR`):
 | File | Purpose |
 |------|---------|
 | `session.json` | Conversation history, system prompt, cached voice settings / model / config |
+| `sessions/` | Archived sessions from `--new` / `/new` (timestamped JSON copies) |
 | `daemon.sock` | Unix socket IPC |
 | `daemon.pid` | Background daemon PID |
 | `daemon.log` | Background orchestration daemon logs |

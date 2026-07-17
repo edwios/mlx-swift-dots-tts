@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,8 @@ IDLE_TIMEOUT_SEC = 30 * 60
 STARTUP_TIMEOUT_SEC = 30
 # None = wait indefinitely for OpenClaw + TTS + afplay (override with --timeout).
 REQUEST_TIMEOUT_SEC: float | None = None
+
+EventHandler = Callable[[dict[str, Any]], None]
 
 
 def _pid_alive(pid: int) -> bool:
@@ -112,19 +115,6 @@ def ensure_daemon_running() -> None:
     )
 
 
-def _send_raw(sock_path: Path, payload: dict[str, Any], timeout: float | None) -> dict[str, Any]:
-    data = json.dumps(payload).encode("utf-8")
-    header = len(data).to_bytes(4, "big")
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-        s.settimeout(timeout)
-        s.connect(str(sock_path))
-        s.sendall(header + data)
-        resp_header = _recv_exact(s, 4)
-        length = int.from_bytes(resp_header, "big")
-        body = _recv_exact(s, length)
-    return json.loads(body.decode("utf-8"))
-
-
 def _recv_exact(sock: socket.socket, n: int) -> bytes:
     buf = bytearray()
     while len(buf) < n:
@@ -135,8 +125,41 @@ def _recv_exact(sock: socket.socket, n: int) -> bytes:
     return bytes(buf)
 
 
+def _recv_json(sock: socket.socket) -> dict[str, Any]:
+    resp_header = _recv_exact(sock, 4)
+    length = int.from_bytes(resp_header, "big")
+    body = _recv_exact(sock, length)
+    return json.loads(body.decode("utf-8"))
+
+
+def _send_raw(
+    sock_path: Path,
+    payload: dict[str, Any],
+    timeout: float | None,
+    *,
+    on_event: EventHandler | None = None,
+) -> dict[str, Any]:
+    data = json.dumps(payload).encode("utf-8")
+    header = len(data).to_bytes(4, "big")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(timeout)
+        s.connect(str(sock_path))
+        s.sendall(header + data)
+        # Daemon may send one or more event frames (e.g. ttsText) before the
+        # final response that includes an "ok" field.
+        while True:
+            msg = _recv_json(s)
+            if "ok" in msg:
+                return msg
+            if on_event is not None:
+                on_event(msg)
+
+
 def send_request(
-    payload: dict[str, Any], *, timeout: float | None = REQUEST_TIMEOUT_SEC
+    payload: dict[str, Any],
+    *,
+    timeout: float | None = REQUEST_TIMEOUT_SEC,
+    on_event: EventHandler | None = None,
 ) -> dict[str, Any]:
     ensure_daemon_running()
-    return _send_raw(daemon_sock_path(), payload, timeout)
+    return _send_raw(daemon_sock_path(), payload, timeout, on_event=on_event)

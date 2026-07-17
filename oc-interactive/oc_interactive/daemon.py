@@ -53,6 +53,7 @@ from oc_interactive.tts_defaults import (
 class RequestResult:
     reply: str | None = None
     error: str | None = None
+    tts_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -133,13 +134,35 @@ def _handle_connection(conn: socket.socket) -> dict[str, Any]:
     length = int.from_bytes(header, "big")
     body = _recv_exact(conn, length)
     request = json.loads(body.decode("utf-8"))
-    result = _process_request(request)
+    result = _process_request(request, conn=conn)
     response: dict[str, Any] = {"ok": True}
     if result.reply is not None:
         response["reply"] = result.reply
     if result.error is not None:
         response["error"] = result.error
+    # ttsText is streamed before playback; include on final for older clients.
+    if result.tts_text is not None:
+        response["ttsText"] = result.tts_text
     return response
+
+
+def _emit_tts_text(
+    conn: socket.socket | None,
+    text: str,
+    *,
+    is_error: bool = False,
+) -> None:
+    """Send spoken text to the client before synthesis/playback starts."""
+    if conn is None:
+        return
+    _send_json(
+        conn,
+        {
+            "event": "ttsText",
+            "ttsText": text,
+            "isError": bool(is_error),
+        },
+    )
 
 
 def _parse_voice(req: dict[str, Any]) -> VoiceContext:
@@ -207,7 +230,11 @@ def _parse_voice(req: dict[str, Any]) -> VoiceContext:
     )
 
 
-def _process_request(req: dict[str, Any]) -> RequestResult:
+def _process_request(
+    req: dict[str, Any],
+    *,
+    conn: socket.socket | None = None,
+) -> RequestResult:
     text = str(req.get("text", ""))
     agent_name = str(req.get("agent", "main"))
     config_path = Path(str(req.get("openclawConfig", "")))
@@ -225,15 +252,15 @@ def _process_request(req: dict[str, Any]) -> RequestResult:
     debug = bool(req.get("debug")) or debug_enabled()
     quiet = bool(req.get("quiet"))
     if slash is not None:
-        _handle_slash(
+        return _handle_slash(
             slash,
             agent=agent,
             openclaw_config=str(config_path),
             voice=voice,
             debug=debug,
             quiet=quiet,
+            conn=conn,
         )
-        return RequestResult()
 
     return _handle_chat(
         text,
@@ -245,6 +272,7 @@ def _process_request(req: dict[str, Any]) -> RequestResult:
         voice=voice,
         debug=debug,
         quiet=quiet,
+        conn=conn,
     )
 
 
@@ -276,12 +304,13 @@ def _handle_slash(
     voice: VoiceContext,
     debug: bool,
     quiet: bool,
-) -> None:
+    conn: socket.socket | None = None,
+) -> RequestResult:
     session = load_session()
 
     if slash.kind == SlashKind.UNKNOWN:
         spoken = agent_error_line(f"unknown command {slash.raw_verb!r}")
-        _speak(spoken, voice=voice, debug=debug, quiet=quiet)
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn, is_error=True)
         raise ValueError(spoken)
 
     if slash.kind == SlashKind.NEW_SESSION:
@@ -296,8 +325,8 @@ def _handle_slash(
         if archived:
             eprint(f"[oc-interactive] archived session → {archived}")
         eprint(f"[oc-interactive] new session {session.user_id}")
-        _speak(spoken, voice=voice, debug=debug, quiet=quiet)
-        return
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
+        return RequestResult(tts_text=spoken)
 
     if slash.kind == SlashKind.SET_SYSTEM_PROMPT:
         session.system_prompt = slash.value or None
@@ -311,8 +340,8 @@ def _handle_slash(
         eprint(
             f"[oc-interactive] system prompt {'set' if slash.value else 'cleared'}"
         )
-        _speak(spoken, voice=voice, debug=debug, quiet=quiet)
-        return
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
+        return RequestResult(tts_text=spoken)
 
     if slash.kind == SlashKind.HELP:
         _cache_tts_paths(
@@ -322,8 +351,8 @@ def _handle_slash(
             agent=agent,
         )
         spoken = confirmation_text(slash)
-        _speak(spoken, voice=voice, debug=debug, quiet=quiet)
-        return
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
+        return RequestResult(tts_text=spoken)
 
     if slash.kind == SlashKind.STATUS:
         prompt_set = "set" if session.system_prompt else "not set"
@@ -342,8 +371,8 @@ def _handle_slash(
             voice=voice,
             agent=agent,
         )
-        _speak(spoken, voice=voice, debug=debug, quiet=quiet)
-        return
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
+        return RequestResult(tts_text=spoken)
 
     raise ValueError(f"unhandled slash command: {slash.kind}")
 
@@ -359,6 +388,7 @@ def _handle_chat(
     voice: VoiceContext,
     debug: bool,
     quiet: bool,
+    conn: socket.socket | None = None,
 ) -> RequestResult:
     session = load_session()
     _cache_tts_paths(
@@ -399,10 +429,18 @@ def _handle_chat(
     append_assistant_message(session, spoken_raw, agent=agent)
     save_session(session)
 
-    _speak(spoken_raw, voice=voice, debug=debug, quiet=quiet)
+    _speak(
+        spoken_raw,
+        voice=voice,
+        debug=debug,
+        quiet=quiet,
+        conn=conn,
+        is_error=openclaw_failed,
+    )
     if openclaw_failed:
+        # Agent failures are spoken but reported on stderr only (not stdout).
         return RequestResult(error=spoken_raw)
-    return RequestResult(reply=spoken_raw)
+    return RequestResult(reply=spoken_raw, tts_text=spoken_raw)
 
 
 def _speak(
@@ -411,10 +449,11 @@ def _speak(
     voice: VoiceContext,
     debug: bool,
     quiet: bool = False,
+    conn: socket.socket | None = None,
+    is_error: bool = False,
 ) -> None:
-    if not quiet:
-        sys.stdout.write(text if text.endswith("\n") else text + "\n")
-        sys.stdout.flush()
+    _ = quiet  # CLI enforces quiet when printing the streamed ttsText event
+    _emit_tts_text(conn, text, is_error=is_error)
     try:
         synthesize_and_play(
             text,

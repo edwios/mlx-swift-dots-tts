@@ -529,8 +529,27 @@ def main(argv: list[str] | None = None) -> int:
         return _report_error("--timeout must be a positive integer")
 
     eprint("[oc-interactive] waiting for agent reply and TTS…")
+
+    printed_tts: str | None = None
+
+    def _on_daemon_event(msg: dict) -> None:
+        nonlocal printed_tts
+        if msg.get("event") != "ttsText":
+            return
+        text_out = msg.get("ttsText")
+        if not isinstance(text_out, str) or not text_out:
+            return
+        # Agent-failure speech is reported on stderr via the final response.
+        if msg.get("isError"):
+            return
+        if args.quiet:
+            return
+        sys.stdout.write(text_out if text_out.endswith("\n") else text_out + "\n")
+        sys.stdout.flush()
+        printed_tts = text_out
+
     try:
-        resp = send_request(payload, timeout=args.timeout)
+        resp = send_request(payload, timeout=args.timeout, on_event=_on_daemon_event)
     except (TimeoutError, socket.timeout):
         return _report_error(
             "timed out waiting for daemon (OpenClaw + TTS can take several minutes on first run); "
@@ -550,12 +569,24 @@ def main(argv: list[str] | None = None) -> int:
         return _report_error(str(resp.get("error", "unknown error")))
 
     if err := resp.get("error"):
+        # Agent failures: stderr only (also spoken by the daemon).
         eprint(err)
+    else:
+        # Fallback for older daemons that only return ttsText on the final frame.
+        tts_text = resp.get("ttsText")
+        if (
+            printed_tts is None
+            and isinstance(tts_text, str)
+            and tts_text
+            and not args.quiet
+        ):
+            sys.stdout.write(tts_text if tts_text.endswith("\n") else tts_text + "\n")
+            printed_tts = tts_text
 
-    if args.verbose:
-        reply = resp.get("reply")
-        if isinstance(reply, str) and reply:
-            sys.stdout.write(reply + "\n")
+        if args.verbose:
+            reply = resp.get("reply")
+            if isinstance(reply, str) and reply and (args.quiet or reply != printed_tts):
+                sys.stdout.write(reply if reply.endswith("\n") else reply + "\n")
 
     return 0
 

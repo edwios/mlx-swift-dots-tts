@@ -209,7 +209,7 @@ If both stdin and `-t` are given, **stdin wins** and `-t` is ignored.
 
 ### Verbose and quiet output
 
-By default, the full text sent to TTS is printed to **stdout** before playback. Use `-q` / `--quiet` to suppress that.
+By default, the full text sent to TTS is printed to **stdout** as soon as the agent reply is ready (before synthesis/playback). Use `-q` / `--quiet` to suppress that.
 
 Use `-v` / `--verbose` to also print the OpenClaw agent reply to **stdout** after a successful chat turn:
 

@@ -111,6 +111,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to dots-tts binary (default from config or app/.build/dots-tts).",
     )
     p.add_argument(
+        "--timeout",
+        type=int,
+        default=None,
+        metavar="SECONDS",
+        help="Seconds to wait for agent reply and TTS (default: no timeout).",
+    )
+    p.add_argument(
         "--debug",
         action="store_true",
         help="Log timing and TTS model cache status (or set OC_INTERACTIVE_DEBUG=1).",
@@ -250,9 +257,12 @@ def main(argv: list[str] | None = None) -> int:
         "debug": debug_enabled(args.debug),
     }
 
+    if args.timeout is not None and args.timeout <= 0:
+        return _report_error("--timeout must be a positive integer")
+
     eprint("[oc-interactive] waiting for agent reply and TTS…")
     try:
-        resp = send_request(payload)
+        resp = send_request(payload, timeout=args.timeout)
     except (TimeoutError, socket.timeout):
         return _report_error(
             "timed out waiting for daemon (OpenClaw + TTS can take several minutes on first run); "

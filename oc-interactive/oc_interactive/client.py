@@ -20,8 +20,8 @@ from oc_interactive.paths import (
 
 IDLE_TIMEOUT_SEC = 30 * 60
 STARTUP_TIMEOUT_SEC = 30
-# OpenClaw + dots-tts model load + synthesis + afplay can exceed 2 minutes.
-CONNECT_TIMEOUT_SEC = 600
+# None = wait indefinitely for OpenClaw + dots-tts + afplay (override with --timeout).
+REQUEST_TIMEOUT_SEC: float | None = None
 
 
 def _pid_alive(pid: int) -> bool:
@@ -112,7 +112,7 @@ def ensure_daemon_running() -> None:
     )
 
 
-def _send_raw(sock_path: Path, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+def _send_raw(sock_path: Path, payload: dict[str, Any], timeout: float | None) -> dict[str, Any]:
     data = json.dumps(payload).encode("utf-8")
     header = len(data).to_bytes(4, "big")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
@@ -135,6 +135,8 @@ def _recv_exact(sock: socket.socket, n: int) -> bytes:
     return bytes(buf)
 
 
-def send_request(payload: dict[str, Any], *, timeout: float = CONNECT_TIMEOUT_SEC) -> dict[str, Any]:
+def send_request(
+    payload: dict[str, Any], *, timeout: float | None = REQUEST_TIMEOUT_SEC
+) -> dict[str, Any]:
     ensure_daemon_running()
     return _send_raw(daemon_sock_path(), payload, timeout)

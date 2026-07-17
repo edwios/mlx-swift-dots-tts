@@ -7,7 +7,7 @@ import socket
 from typing import Any
 
 
-def send_json(sock_path: str, payload: dict[str, Any], *, timeout: float) -> dict[str, Any]:
+def send_json(sock_path: str, payload: dict[str, Any], *, timeout: float | None) -> dict[str, Any]:
     data = json.dumps(payload).encode("utf-8")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
         s.settimeout(timeout)

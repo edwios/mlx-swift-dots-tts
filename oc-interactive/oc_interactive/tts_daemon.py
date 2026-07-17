@@ -16,7 +16,7 @@ from oc_interactive.paths import (
 )
 
 TTS_STARTUP_TIMEOUT_SEC = 120
-TTS_REQUEST_TIMEOUT_SEC = 600
+TTS_REQUEST_TIMEOUT_SEC: float | None = None
 
 
 def _pid_alive(pid: int) -> bool:

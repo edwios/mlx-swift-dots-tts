@@ -104,7 +104,7 @@ The daemon listens on a Unix socket at `$OC_INTERACTIVE_STATE_DIR/tts-daemon.soc
 - `synthMs` — synthesis time for the request.
 - Set `"debug": true` or `OC_INTERACTIVE_DEBUG=1` for per-request cache logs on stderr.
 
-`oc-interactive` auto-starts this daemon; you normally do not run it manually.
+`oc-interactive` auto-starts this daemon; you normally do not run it manually. Use `oc-interactive --timeout SECONDS` to cap how long the client waits for synthesis (default: no timeout).
 
 ### Arguments
 

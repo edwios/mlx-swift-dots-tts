@@ -221,6 +221,7 @@ oc-interactive -t "/history" > conversation.json
 | `--agent` | OpenClaw agent short name |
 | `-c` / `--config` | Path to `openclaw.json` (default: `~/.config/oc-interactive/openclaw.json`; cached after first turn; `--openclaw-config` is an alias) |
 | `--dots-tts` | Path to `dots-tts` binary |
+| `--timeout SECONDS` | Max seconds to wait for agent reply and TTS (default: no timeout) |
 | `--debug` | Log OpenClaw/TTS timing and cache status (`OC_INTERACTIVE_DEBUG=1`) |
 
 ## State files
@@ -246,7 +247,7 @@ The orchestration daemon shuts down after 30 minutes idle; the next invocation r
 | Very slow every turn (`modelReloaded=True` always) | Rebuild `dots-tts` (`cd app && make build`). Ensure `tts-daemon.log` shows the daemon staying alive between turns. |
 | `peer closed connection` / no audio | Stale socket after a crashed daemon — remove `tts-daemon.sock` and `tts-daemon.pid`, or restart. Check `tts-daemon.log`. |
 | `dots-tts not found` on turn 2+ | Pass `--dots-tts` on the first turn, or set an absolute `dotsTtsBinary` in config (cached as `lastDotsTts` in session). |
-| Client times out but audio plays | OpenClaw + first model load can exceed older timeouts; current client allows 10 minutes. Check `daemon.log`. |
+| Client times out but audio plays | Long replies or first model load can exceed `--timeout`; omit it for no limit. Audio may still play — check `daemon.log`. |
 
 After code changes, restart the orchestration daemon so it picks up the installed package:
 

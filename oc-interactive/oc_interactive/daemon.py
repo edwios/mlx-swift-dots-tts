@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from oc_interactive.client import CONNECT_TIMEOUT_SEC, IDLE_TIMEOUT_SEC
+from oc_interactive.client import IDLE_TIMEOUT_SEC, REQUEST_TIMEOUT_SEC
 from oc_interactive.config import OpenClawConfig, load_config
 from oc_interactive.io import eprint
 from oc_interactive.openclaw import OpenClawError, chat_completion
@@ -76,7 +76,7 @@ def run_daemon() -> int:
                 continue
             last_activity = time.monotonic()
             with conn:
-                conn.settimeout(CONNECT_TIMEOUT_SEC)
+                conn.settimeout(REQUEST_TIMEOUT_SEC)
                 try:
                     response = _handle_connection(conn)
                 except Exception as e:

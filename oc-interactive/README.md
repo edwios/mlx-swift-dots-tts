@@ -78,13 +78,13 @@ Copy the example config:
 
 ```bash
 mkdir -p ~/.config/oc-interactive
-cp config/openclaw.example.json ~/.config/oc-interactive/openclaw.json
+cp config/oc-interactive.example.json ~/.config/oc-interactive/oc-interactive.json
 ```
 
-Override the config path with `-c` / `--config` (default: `~/.config/oc-interactive/openclaw.json`):
+Override the config path with `-c` / `--config` (default: `~/.config/oc-interactive/oc-interactive.json`):
 
 ```bash
-oc-interactive -c /path/to/openclaw.json -t "Hello" --speaker Ryan
+oc-interactive -c /path/to/oc-interactive.json -t "Hello" --speaker Ryan
 ```
 
 Edit paths as needed. Example:
@@ -112,7 +112,7 @@ Edit paths as needed. Example:
 - `ttsVoiceDesign`: optional natural-language voice description. If set, VoiceDesign mode is used by default. **Takes priority over `ttsSpeaker` when both are defined.**
 - `ssh` block is informational only; start your tunnel separately.
 
-**CLI options override config.** Values in `openclaw.json` are defaults. Flags such as `--speaker`, `--instruct`, `--voice-design`, `-m` / `--model`, `-l` / `--language`, and `--agent` take precedence for that turn. Successful turns then cache the effective settings in `session.json`, so later turns can omit those flags until you override them again on the CLI.
+**CLI options override config.** Values in `oc-interactive.json` are defaults. Flags such as `--speaker`, `--instruct`, `--voice-design`, `-m` / `--model`, `-l` / `--language`, and `--agent` take precedence for that turn. Successful turns then cache the effective settings in `session.json`, so later turns can omit those flags until you override them again on the CLI.
 
 ```bash
 export ELLO_GATEWAY_TOKEN=your-token
@@ -260,7 +260,7 @@ oc-interactive -t "/history" > conversation.json
 | `-v` / `--verbose` | Print successful OpenClaw agent reply to stdout |
 | `-q` / `--quiet` | Do not print the text sent to TTS (full TTS text is printed to stdout by default) |
 | `--agent` | OpenClaw agent short name |
-| `-c` / `--config` | Path to `openclaw.json` (default: `~/.config/oc-interactive/openclaw.json`; cached after first turn; `--openclaw-config` is an alias) |
+| `-c` / `--config` | Path to `oc-interactive.json` (default: `~/.config/oc-interactive/oc-interactive.json`; cached after first turn) |
 | `--timeout SECONDS` | Max seconds to wait for agent reply and TTS (default: no timeout) |
 | `--debug` | Log OpenClaw/TTS timing and cache status (`OC_INTERACTIVE_DEBUG=1`) |
 

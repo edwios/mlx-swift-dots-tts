@@ -140,11 +140,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "-c",
         "--config",
-        "--openclaw-config",
         dest="openclaw_config",
         default=None,
         metavar="PATH",
-        help=f"Path to openclaw.json gateway config (default: {default_config_path()}; "
+        help=f"Path to oc-interactive.json gateway config (default: {default_config_path()}; "
         "cached after first turn).",
     )
     p.add_argument(

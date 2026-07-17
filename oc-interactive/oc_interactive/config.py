@@ -92,7 +92,7 @@ def _resolve_model(value: str | None, *, base: Path) -> str:
 
 def load_config(path: Path) -> OpenClawConfig:
     if not path.exists():
-        raise FileNotFoundError(f"openclaw config not found: {path}")
+        raise FileNotFoundError(f"oc-interactive config not found: {path}")
 
     with path.open(encoding="utf-8") as f:
         raw: dict[str, Any] = json.load(f)

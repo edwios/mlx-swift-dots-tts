@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-DEFAULT_CONFIG_NAME = "openclaw.json"
+DEFAULT_CONFIG_NAME = "oc-interactive.json"
 DAEMON_SOCK = "daemon.sock"
 DAEMON_PID = "daemon.pid"
 DAEMON_LOG = "daemon.log"

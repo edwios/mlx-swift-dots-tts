@@ -192,6 +192,56 @@ def _resolve_model_string(model: str) -> str:
     return raw
 
 
+def _is_mlx_audio_compatible_model(model: str) -> bool:
+    """False for legacy dots.tts paths/checkpoints that mlx-audio cannot load."""
+    raw = (model or "").strip()
+    if not raw:
+        return False
+    lower = raw.lower().replace("\\", "/")
+    if "dots.tts" in lower or "dots_tts" in lower or "/dots.tts-" in lower:
+        return False
+
+    path = Path(raw).expanduser()
+    if not path.exists() or not path.is_dir():
+        # HF repo ids and missing paths: assume OK (download / fail later).
+        return True
+
+    for candidate in (
+        path / "config.json",
+        path / "backbone" / "config.json",
+        path / "model_index.json",
+    ):
+        if not candidate.is_file():
+            continue
+        try:
+            import json
+
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        model_type = str(
+            data.get("model_type")
+            or data.get("model_type".upper())
+            or data.get("architectures", [""])[0]
+            or ""
+        ).lower()
+        if "dots" in model_type:
+            return False
+    return True
+
+
+def _resolve_tts_model(args: argparse.Namespace, cfg, session) -> str:
+    """CLI > compatible session cache > config > built-in default."""
+    if args.model:
+        return _resolve_model_string(args.model)
+
+    cached = session.last_tts_model
+    if cached and _is_mlx_audio_compatible_model(cached):
+        return cached
+
+    return cfg.tts_model or DEFAULT_TTS_MODEL
+
+
 def _resolve_voice(args: argparse.Namespace, cfg) -> VoiceSettings:
     session = load_session()
     cfg_voice_design = getattr(cfg, "tts_voice_design", None)
@@ -211,12 +261,7 @@ def _resolve_voice(args: argparse.Namespace, cfg) -> VoiceSettings:
     else:
         mode = DEFAULT_MODE
 
-    if args.model:
-        tts_model = _resolve_model_string(args.model)
-    elif session.last_tts_model:
-        tts_model = session.last_tts_model
-    else:
-        tts_model = cfg.tts_model or DEFAULT_TTS_MODEL
+    tts_model = _resolve_tts_model(args, cfg, session)
 
     if args.language:
         language = args.language

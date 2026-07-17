@@ -265,6 +265,7 @@ The orchestration daemon shuts down after 30 minutes idle; the next invocation r
 
 | Symptom | What to check |
 |---------|----------------|
+| `Model type dots_tts not supported` | Stale `lastTtsModel` in `~/.config/oc-interactive/session.json` from the old dots-tts era. Pass `-m mlx-community/Qwen3-TTS-…`, or delete `lastTtsModel` from the session file. oc-interactive now ignores dots paths automatically after upgrade. |
 | Very slow every turn (`modelReloaded=True` always) | Ensure `tts-daemon.log` shows the daemon staying alive between turns. Restart with `pkill -f qwen_tts_daemon`. |
 | `peer closed connection` / no audio | Stale socket after a crashed daemon — remove `tts-daemon.sock` and `tts-daemon.pid`, or restart. Check `tts-daemon.log`. |
 | Model type / speaker errors | Match `-m` to the mode (CustomVoice vs Base vs VoiceDesign). List speakers for CustomVoice in the mlx-audio Qwen3-TTS docs. |

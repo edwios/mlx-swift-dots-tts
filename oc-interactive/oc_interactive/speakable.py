@@ -1,18 +1,6 @@
-"""Prepare text for dots-tts synthesis."""
+"""Prepare text for TTS synthesis."""
 
 from __future__ import annotations
-
-EN_TAG = "[EN]"
-
-
-def tag_for_tts(text: str, *, language: str = "EN") -> str:
-    """Prefix [CODE] when not already present (dots-tts English = EN)."""
-    text = text.strip()
-    code = language.upper() if language else "EN"
-    tag = f"[{code}]"
-    if text.startswith("["):
-        return text
-    return tag + text
 
 
 def agent_error_line(reason: str) -> str:

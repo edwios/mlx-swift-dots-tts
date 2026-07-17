@@ -1,15 +1,13 @@
-"""Synthesize speech via cached dots-tts daemon and play through speakers."""
+"""Synthesize speech via cached Qwen3-TTS daemon and play through speakers."""
 
 from __future__ import annotations
 
 import subprocess
-import sys
 import tempfile
 import time
 from pathlib import Path
 
 from oc_interactive.io import eprint
-from oc_interactive.speakable import tag_for_tts
 from oc_interactive.tts_daemon import synthesize_to_wav
 
 
@@ -20,35 +18,31 @@ class TTSError(Exception):
 def synthesize_and_play(
     text: str,
     *,
-    refaudio: str,
-    reftext: str | None,
     model: str,
-    dots_tts_bin: Path,
-    language: str = "EN",
+    mode: str,
+    language: str = "English",
+    speaker: str | None = None,
+    instruct: str | None = None,
+    refaudio: str | None = None,
+    reftext: str | None = None,
     debug: bool = False,
 ) -> dict[str, float | bool]:
-    """Return TTS timing metrics from the dots-tts daemon."""
-    if not dots_tts_bin.exists():
-        raise TTSError(
-            f"dots-tts binary not found at {dots_tts_bin}; "
-            "build it with: cd app && make build"
-        )
-
-    tagged = tag_for_tts(text, language=language)
-
+    """Return TTS timing metrics from the Qwen3-TTS daemon."""
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         wav_path = Path(tmp.name)
 
     t0 = time.monotonic()
     try:
         resp = synthesize_to_wav(
-            text=tagged,
-            refaudio=refaudio,
-            reftext=reftext,
+            text=text,
             model=model,
             output=wav_path,
-            dots_tts_bin=dots_tts_bin,
-            language=language.upper(),
+            mode=mode,
+            language=language,
+            speaker=speaker,
+            instruct=instruct,
+            refaudio=refaudio,
+            reftext=reftext,
             debug=debug,
         )
         if not resp.get("ok"):
@@ -56,12 +50,11 @@ def synthesize_and_play(
 
         if debug:
             model_reloaded = resp.get("modelReloaded", False)
-            ref_reloaded = resp.get("refaudioReloaded", False)
             load_ms = resp.get("loadMs", 0)
             synth_ms = resp.get("synthMs", 0)
             eprint(
-                f"[oc-interactive] tts-daemon modelReloaded={model_reloaded} "
-                f"refaudioReloaded={ref_reloaded} loadMs={load_ms:.0f} synthMs={synth_ms:.0f}"
+                f"[oc-interactive] tts-daemon mode={mode} modelReloaded={model_reloaded} "
+                f"loadMs={load_ms:.0f} synthMs={synth_ms:.0f}"
             )
 
         play = subprocess.run(
@@ -78,7 +71,6 @@ def synthesize_and_play(
     wall_ms = (time.monotonic() - t0) * 1000
     return {
         "modelReloaded": bool(resp.get("modelReloaded")),
-        "refaudioReloaded": bool(resp.get("refaudioReloaded")),
         "loadMs": float(resp.get("loadMs", 0)),
         "synthMs": float(resp.get("synthMs", 0)),
         "wallMs": wall_ms,

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run oc-interactive from the repo without activating the venv or adding to PATH.
+# Run oc-interactive with a CustomVoice speaker (Eileen-style defaults).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BIN="$ROOT/.venv/bin/oc-interactive"
@@ -7,5 +7,8 @@ if [[ ! -x "$BIN" ]]; then
   echo "oc-interactive not installed; run: cd $ROOT && make install" >&2
   exit 1
 fi
-exec "$BIN" -r "sample_audio/So ... any request at all for me to do anything.wav" --reftext "So ... any request at all for me to do anything?" -c ello.conf  "$@"
-
+exec "$BIN" \
+  --speaker Ryan \
+  --instruct "warm, friendly, and conversational" \
+  -c ello.conf \
+  "$@"

@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from oc_interactive.tts_defaults import DEFAULT_SPEAKER, DEFAULT_TTS_MODEL
+
 _ENV_REF = re.compile(r"^\$([A-Za-z_][A-Za-z0-9_]*)$")
 
 
@@ -18,7 +20,9 @@ class OpenClawConfig:
     token: str
     default_agent: str
     agents: tuple[str, ...]
-    dots_tts_binary: Path | None
+    tts_model: str
+    tts_speaker: str
+    tts_voice_design: str | None
     raw: dict[str, Any]
 
     def resolve_agent(self, name: str | None) -> str:
@@ -62,6 +66,24 @@ def _expand_path(value: str | None, *, base: Path) -> Path | None:
     return p
 
 
+def _resolve_model(value: str | None, *, base: Path) -> str:
+    """Return HF repo id as-is, or resolve a local path relative to config."""
+    if not value:
+        return DEFAULT_TTS_MODEL
+    raw = value.strip()
+    if not raw:
+        return DEFAULT_TTS_MODEL
+    # Local paths: absolute, relative, or existing on disk.
+    looks_local = (
+        raw.startswith(("/", "./", "../", "~"))
+        or Path(raw).expanduser().exists()
+    )
+    if looks_local:
+        expanded = _expand_path(raw, base=base)
+        return str(expanded) if expanded else DEFAULT_TTS_MODEL
+    return raw
+
+
 def load_config(path: Path) -> OpenClawConfig:
     if not path.exists():
         raise FileNotFoundError(f"openclaw config not found: {path}")
@@ -89,13 +111,21 @@ def load_config(path: Path) -> OpenClawConfig:
             f'defaultAgent "{default_agent}" is not in agents list'
         )
 
-    dots_bin = _expand_path(raw.get("dotsTtsBinary"), base=path.parent)
+    tts_model = _resolve_model(raw.get("ttsModel"), base=path.parent)
+    tts_speaker = str(raw.get("ttsSpeaker") or DEFAULT_SPEAKER).strip() or DEFAULT_SPEAKER
+    voice_design_raw = raw.get("ttsVoiceDesign")
+    if isinstance(voice_design_raw, str):
+        tts_voice_design = voice_design_raw.strip() or None
+    else:
+        tts_voice_design = None
 
     return OpenClawConfig(
         base_url=base_url,
         token=token,
         default_agent=default_agent,
         agents=agents,
-        dots_tts_binary=dots_bin,
+        tts_model=tts_model,
+        tts_speaker=tts_speaker,
+        tts_voice_design=tts_voice_design,
         raw=raw,
     )

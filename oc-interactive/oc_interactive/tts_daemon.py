@@ -1,9 +1,10 @@
-"""Persistent dots-tts --tts-daemon client (cached MLX model)."""
+"""Persistent Qwen3-TTS daemon client (cached mlx-audio model)."""
 
 from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -57,10 +58,7 @@ def _cleanup_stale_tts_daemon() -> None:
         pid_path.unlink(missing_ok=True)
 
 
-def ensure_tts_daemon_running(dots_tts_bin: Path) -> None:
-    if not dots_tts_bin.exists():
-        raise FileNotFoundError(f"dots-tts binary not found: {dots_tts_bin}")
-
+def ensure_tts_daemon_running() -> None:
     ensure_state_dir()
     sock = tts_daemon_sock_path()
     pid = _read_pid()
@@ -88,12 +86,11 @@ def ensure_tts_daemon_running(dots_tts_bin: Path) -> None:
         env.setdefault("OC_INTERACTIVE_STATE_DIR", str(ensure_state_dir()))
         log_file = open(log_path, "a", encoding="utf-8")
         subprocess.Popen(
-            [str(dots_tts_bin), "--tts-daemon"],
+            [sys.executable, "-m", "oc_interactive.qwen_tts_daemon"],
             stdin=subprocess.DEVNULL,
             stdout=log_file,
             stderr=log_file,
             start_new_session=True,
-            cwd=str(dots_tts_bin.parent),
             env=env,
         )
         log_file.close()
@@ -121,23 +118,31 @@ def ensure_tts_daemon_running(dots_tts_bin: Path) -> None:
 def synthesize_to_wav(
     *,
     text: str,
-    refaudio: str,
-    reftext: str | None,
     model: str,
     output: Path,
-    dots_tts_bin: Path,
-    language: str = "EN",
+    mode: str,
+    language: str = "English",
+    speaker: str | None = None,
+    instruct: str | None = None,
+    refaudio: str | None = None,
+    reftext: str | None = None,
     debug: bool = False,
 ) -> dict[str, Any]:
-    ensure_tts_daemon_running(dots_tts_bin)
-    payload = {
+    ensure_tts_daemon_running()
+    payload: dict[str, Any] = {
         "text": text,
-        "refaudio": refaudio,
         "model": model,
+        "mode": mode,
         "language": language,
         "output": str(output),
         "debug": debug,
     }
+    if speaker:
+        payload["speaker"] = speaker
+    if instruct:
+        payload["instruct"] = instruct
+    if refaudio:
+        payload["refaudio"] = refaudio
     if reftext:
         payload["reftext"] = reftext
     return send_json(

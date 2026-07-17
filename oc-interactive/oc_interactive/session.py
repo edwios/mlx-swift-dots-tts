@@ -29,7 +29,11 @@ class Session:
     last_refaudio: str | None = None
     last_reftext: str | None = None
     last_tts_model: str | None = None
-    last_dots_tts: str | None = None
+    last_speaker: str | None = None
+    last_instruct: str | None = None
+    last_voice_mode: str | None = None
+    last_voice_design: str | None = None
+    last_language: str | None = None
     last_openclaw_config: str | None = None
     messages: list[dict[str, Any]] = field(default_factory=list)
 
@@ -42,7 +46,11 @@ class Session:
             last_refaudio=data.get("lastRefaudio"),
             last_reftext=data.get("lastReftext"),
             last_tts_model=data.get("lastTtsModel"),
-            last_dots_tts=data.get("lastDotsTts"),
+            last_speaker=data.get("lastSpeaker"),
+            last_instruct=data.get("lastInstruct"),
+            last_voice_mode=data.get("lastVoiceMode"),
+            last_voice_design=data.get("lastVoiceDesign"),
+            last_language=data.get("lastLanguage"),
             last_openclaw_config=data.get("lastOpenclawConfig"),
             messages=list(data.get("messages") or []),
         )
@@ -62,8 +70,16 @@ class Session:
             out["lastReftext"] = self.last_reftext
         if self.last_tts_model:
             out["lastTtsModel"] = self.last_tts_model
-        if self.last_dots_tts:
-            out["lastDotsTts"] = self.last_dots_tts
+        if self.last_speaker:
+            out["lastSpeaker"] = self.last_speaker
+        if self.last_instruct:
+            out["lastInstruct"] = self.last_instruct
+        if self.last_voice_mode:
+            out["lastVoiceMode"] = self.last_voice_mode
+        if self.last_voice_design:
+            out["lastVoiceDesign"] = self.last_voice_design
+        if self.last_language:
+            out["lastLanguage"] = self.last_language
         if self.last_openclaw_config:
             out["lastOpenclawConfig"] = self.last_openclaw_config
         return out
@@ -112,7 +128,11 @@ def new_session(*, keep_system_prompt: bool = True) -> Session:
         last_refaudio=current.last_refaudio,
         last_reftext=current.last_reftext,
         last_tts_model=current.last_tts_model,
-        last_dots_tts=current.last_dots_tts,
+        last_speaker=current.last_speaker,
+        last_instruct=current.last_instruct,
+        last_voice_mode=current.last_voice_mode,
+        last_voice_design=current.last_voice_design,
+        last_language=current.last_language,
         last_openclaw_config=current.last_openclaw_config,
         messages=[],
     )

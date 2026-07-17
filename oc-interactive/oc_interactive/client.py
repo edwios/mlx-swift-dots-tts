@@ -20,7 +20,7 @@ from oc_interactive.paths import (
 
 IDLE_TIMEOUT_SEC = 30 * 60
 STARTUP_TIMEOUT_SEC = 30
-# None = wait indefinitely for OpenClaw + dots-tts + afplay (override with --timeout).
+# None = wait indefinitely for OpenClaw + TTS + afplay (override with --timeout).
 REQUEST_TIMEOUT_SEC: float | None = None
 
 

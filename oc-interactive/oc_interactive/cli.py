@@ -6,6 +6,7 @@ import argparse
 import json
 import socket
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from oc_interactive.client import send_request
@@ -19,6 +20,27 @@ from oc_interactive.slash import (
     is_slash_command,
     parse_slash_command,
 )
+from oc_interactive.tts_defaults import (
+    DEFAULT_LANGUAGE,
+    DEFAULT_MODE,
+    DEFAULT_SPEAKER,
+    DEFAULT_TTS_MODEL,
+    MODE_CLONE,
+    MODE_CUSTOM_VOICE,
+    MODE_VOICE_DESIGN,
+)
+
+
+@dataclass(frozen=True)
+class VoiceSettings:
+    mode: str
+    tts_model: str
+    language: str
+    speaker: str | None = None
+    instruct: str | None = None
+    voice_design: str | None = None
+    refaudio: str | None = None
+    reftext: str | None = None
 
 
 def _read_stdin_text() -> str | None:
@@ -53,8 +75,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p = Parser(
         prog="oc-interactive",
         description=(
-            "Send text to an OpenClaw agent and speak the reply via dots-tts. "
-            "Each invocation is one turn; a background daemon orchestrates TTS."
+            "Send text to an OpenClaw agent and speak the reply via Qwen3-TTS "
+            "(mlx-audio). Each invocation is one turn; a background daemon "
+            "orchestrates TTS."
         ),
     )
     p.add_argument(
@@ -67,16 +90,29 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "-r",
         "--refaudio",
-        help="Reference audio for voice cloning (required on first TTS turn).",
+        help="Reference audio for voice cloning (Base model). Implies clone mode.",
     )
     p.add_argument(
         "--reftext",
-        help="Transcript of the reference audio (required with --refaudio; ignored otherwise).",
+        help="Transcript of the reference audio (required with --refaudio).",
+    )
+    p.add_argument(
+        "--speaker",
+        help=f"CustomVoice speaker (default: {DEFAULT_SPEAKER}). English: Ryan, Aiden.",
+    )
+    p.add_argument(
+        "--instruct",
+        help="Emotion/style instruction for CustomVoice (e.g. 'calm and warm').",
+    )
+    p.add_argument(
+        "--voice-design",
+        dest="voice_design",
+        help="Natural-language voice description (VoiceDesign model). Implies voice_design mode.",
     )
     p.add_argument(
         "-l",
         "--language",
-        help="Language tag (parity with dots-tts; agent replies use EN).",
+        help=f"Language for TTS (default: {DEFAULT_LANGUAGE}).",
     )
     p.add_argument(
         "-o",
@@ -87,8 +123,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "-m",
         "--model",
-        default="./dots.tts-soar-mlx",
-        help="Path to the dots.tts-soar-mlx model directory.",
+        default=None,
+        help=(
+            "Qwen3-TTS mlx-audio model id or local path "
+            f"(default: {DEFAULT_TTS_MODEL})."
+        ),
     )
     p.add_argument(
         "--agent",
@@ -104,11 +143,6 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help=f"Path to openclaw.json gateway config (default: {default_config_path()}; "
         "cached after first turn).",
-    )
-    p.add_argument(
-        "--dots-tts",
-        default=None,
-        help="Path to dots-tts binary (default from config or app/.build/dots-tts).",
     )
     p.add_argument(
         "--timeout",
@@ -134,53 +168,127 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    p.add_argument(
+        "--tts-daemon",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     return p
 
 
-def _resolve_paths(
-    args: argparse.Namespace,
-    cfg,
-) -> tuple[str, str | None, str, Path]:
+def _resolve_model_string(model: str) -> str:
+    """Keep HF repo ids as-is; resolve local paths."""
+    raw = model.strip()
+    if not raw:
+        return DEFAULT_TTS_MODEL
+    looks_local = (
+        raw.startswith(("/", "./", "../", "~"))
+        or Path(raw).expanduser().exists()
+    )
+    if looks_local:
+        return str(Path(raw).expanduser().resolve())
+    return raw
+
+
+def _resolve_voice(args: argparse.Namespace, cfg) -> VoiceSettings:
     session = load_session()
+    cfg_voice_design = getattr(cfg, "tts_voice_design", None)
 
-    refaudio = args.refaudio
-    # --reftext is only honored together with --refaudio; otherwise ignored.
-    if refaudio:
-        refaudio = str(Path(refaudio).expanduser().resolve())
-        reftext_arg = (args.reftext or "").strip()
-        if not reftext_arg:
-            raise CliError("--reftext is required when --refaudio is provided")
-        reftext = reftext_arg
-    elif session.last_refaudio:
-        refaudio = session.last_refaudio
-        reftext = session.last_reftext
+    # Mode: explicit CLI flags win; otherwise restore from session / config.
+    # Config: ttsVoiceDesign takes priority over ttsSpeaker when both are set.
+    if args.voice_design:
+        mode = MODE_VOICE_DESIGN
+    elif args.refaudio:
+        mode = MODE_CLONE
+    elif args.speaker is not None or args.instruct is not None:
+        mode = MODE_CUSTOM_VOICE
+    elif session.last_voice_mode:
+        mode = session.last_voice_mode
+    elif cfg_voice_design:
+        mode = MODE_VOICE_DESIGN
     else:
-        raise CliError(
-            "--refaudio is required on the first turn (no cached reference audio)"
-        )
+        mode = DEFAULT_MODE
 
-    tts_model = args.model
-    if session.last_tts_model:
+    if args.model:
+        tts_model = _resolve_model_string(args.model)
+    elif session.last_tts_model:
         tts_model = session.last_tts_model
-    elif tts_model:
-        tts_model = str(Path(tts_model).expanduser().resolve())
     else:
-        tts_model = str(Path("./dots.tts-soar-mlx").expanduser().resolve())
+        tts_model = cfg.tts_model or DEFAULT_TTS_MODEL
 
-    dots_bin = args.dots_tts
-    if dots_bin:
-        dots_path = Path(dots_bin).expanduser().resolve()
-    elif session.last_dots_tts:
-        dots_path = Path(session.last_dots_tts)
-    elif cfg.dots_tts_binary:
-        dots_path = cfg.dots_tts_binary
+    if args.language:
+        language = args.language
+    elif session.last_language:
+        language = session.last_language
     else:
-        # Default relative to repo layout when run from oc-interactive/
-        dots_path = (
-            Path(__file__).resolve().parent.parent.parent / "app" / ".build" / "dots-tts"
-        ).resolve()
+        language = DEFAULT_LANGUAGE
 
-    return refaudio, reftext, tts_model, dots_path
+    speaker: str | None = None
+    instruct: str | None = None
+    voice_design: str | None = None
+    refaudio: str | None = None
+    reftext: str | None = None
+
+    if mode == MODE_VOICE_DESIGN:
+        if args.voice_design:
+            voice_design = args.voice_design.strip()
+        elif session.last_voice_design:
+            voice_design = session.last_voice_design
+        elif cfg_voice_design:
+            voice_design = cfg_voice_design
+        else:
+            raise CliError(
+                "--voice-design or config ttsVoiceDesign is required for VoiceDesign mode"
+            )
+        if not voice_design:
+            raise CliError("voice design description must not be empty")
+        instruct = voice_design
+
+    elif mode == MODE_CLONE:
+        if args.refaudio:
+            refaudio = str(Path(args.refaudio).expanduser().resolve())
+            reftext_arg = (args.reftext or "").strip()
+            if not reftext_arg:
+                raise CliError("--reftext is required when --refaudio is provided")
+            reftext = reftext_arg
+        elif session.last_refaudio:
+            refaudio = session.last_refaudio
+            reftext = session.last_reftext
+        else:
+            raise CliError(
+                "--refaudio is required for clone mode (no cached reference audio)"
+            )
+        if not reftext:
+            raise CliError("reftext is required for clone mode")
+
+    else:
+        mode = MODE_CUSTOM_VOICE
+        if args.speaker is not None:
+            speaker = args.speaker.strip() or None
+        elif session.last_speaker:
+            speaker = session.last_speaker
+        else:
+            speaker = cfg.tts_speaker or DEFAULT_SPEAKER
+        if not speaker:
+            speaker = DEFAULT_SPEAKER
+
+        if args.instruct is not None:
+            instruct = args.instruct.strip() or None
+        elif session.last_instruct:
+            instruct = session.last_instruct
+        else:
+            instruct = None
+
+    return VoiceSettings(
+        mode=mode,
+        tts_model=tts_model,
+        language=language,
+        speaker=speaker,
+        instruct=instruct,
+        voice_design=voice_design,
+        refaudio=refaudio,
+        reftext=reftext,
+    )
 
 
 def _resolve_config_path(args: argparse.Namespace) -> Path:
@@ -214,6 +322,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.daemon:
         return daemon_main()
+    if args.tts_daemon:
+        from oc_interactive.qwen_tts_daemon import main as tts_daemon_main
+
+        return tts_daemon_main()
 
     text = _resolve_text(args, parser)
 
@@ -236,23 +348,22 @@ def main(argv: list[str] | None = None) -> int:
         return _report_error(str(e))
 
     try:
-        refaudio, reftext, tts_model, dots_path = _resolve_paths(args, cfg)
+        voice = _resolve_voice(args, cfg)
     except CliError as e:
         return _report_error(str(e))
 
-    if not dots_path.exists():
-        return _report_error(
-            f"dots-tts not found at {dots_path}; build with: cd app && make build"
-        )
-
     payload = {
         "text": text,
-        "refaudio": refaudio,
-        "reftext": reftext,
-        "ttsModel": tts_model,
+        "ttsModel": voice.tts_model,
+        "mode": voice.mode,
+        "language": voice.language,
+        "speaker": voice.speaker,
+        "instruct": voice.instruct,
+        "voiceDesign": voice.voice_design,
+        "refaudio": voice.refaudio,
+        "reftext": voice.reftext,
         "agent": agent,
         "openclawConfig": str(config_path),
-        "dotsTtsBinary": str(dots_path),
         "openclawToken": cfg.token,
         "debug": debug_enabled(args.debug),
     }

@@ -3,14 +3,7 @@
   "openclawToken": "$ELLO_GATEWAY_TOKEN",
   "defaultAgent": "main",
   "agents": ["main", "news", "eileen"],
-  "dotsTtsBinary": "/absolute/path/to/mlx-swift-dots-tts/app/.build/dots-tts",
-  "ssh": {
-    "enabled": true,
-    "host": "ello.local",
-    "user": "fsoc4",
-    "identityFile": "~/.ssh/id_ed25519",
-    "localPort": 18789,
-    "remoteHost": "127.0.0.1",
-    "remotePort": 18789
-  }
+  "ttsModel": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+  "ttsSpeaker": "Ryan",
+  "ttsVoiceDesign": null
 }

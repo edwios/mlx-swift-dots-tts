@@ -37,14 +37,34 @@ from oc_interactive.slash import (
     confirmation_text,
     parse_slash_command,
 )
-from oc_interactive.speakable import agent_error_line, ensure_utf8, tag_for_tts
+from oc_interactive.speakable import agent_error_line, ensure_utf8
 from oc_interactive.tts import TTSError, synthesize_and_play
+from oc_interactive.tts_defaults import (
+    DEFAULT_LANGUAGE,
+    DEFAULT_MODE,
+    DEFAULT_SPEAKER,
+    MODE_CLONE,
+    MODE_CUSTOM_VOICE,
+    MODE_VOICE_DESIGN,
+)
 
 
 @dataclass
 class RequestResult:
     reply: str | None = None
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class VoiceContext:
+    mode: str
+    tts_model: str
+    language: str
+    speaker: str | None = None
+    instruct: str | None = None
+    voice_design: str | None = None
+    refaudio: str | None = None
+    reftext: str | None = None
 
 
 def run_daemon() -> int:
@@ -122,18 +142,75 @@ def _handle_connection(conn: socket.socket) -> dict[str, Any]:
     return response
 
 
-def _process_request(req: dict[str, Any]) -> RequestResult:
-    text = str(req.get("text", ""))
-    agent_name = str(req.get("agent", "main"))
-    refaudio = str(req.get("refaudio", ""))
+def _parse_voice(req: dict[str, Any]) -> VoiceContext:
+    mode = str(req.get("mode") or DEFAULT_MODE).strip().lower()
+    tts_model = str(req.get("ttsModel") or "").strip()
+    if not tts_model:
+        raise ValueError("ttsModel is required")
+
+    language = str(req.get("language") or DEFAULT_LANGUAGE).strip() or DEFAULT_LANGUAGE
+
+    speaker = req.get("speaker")
+    if isinstance(speaker, str):
+        speaker = speaker.strip() or None
+    else:
+        speaker = None
+
+    instruct = req.get("instruct")
+    if isinstance(instruct, str):
+        instruct = instruct.strip() or None
+    else:
+        instruct = None
+
+    voice_design = req.get("voiceDesign")
+    if isinstance(voice_design, str):
+        voice_design = voice_design.strip() or None
+    else:
+        voice_design = None
+
+    refaudio = req.get("refaudio")
+    if isinstance(refaudio, str):
+        refaudio = refaudio.strip() or None
+    else:
+        refaudio = None
+
     reftext = req.get("reftext")
     if isinstance(reftext, str):
         reftext = reftext.strip() or None
     else:
         reftext = None
-    tts_model = str(req.get("ttsModel", ""))
+
+    if mode == MODE_VOICE_DESIGN:
+        if not (voice_design or instruct):
+            raise ValueError("voiceDesign / instruct is required for voice_design mode")
+        instruct = voice_design or instruct
+        voice_design = instruct
+    elif mode == MODE_CLONE:
+        if not refaudio:
+            raise ValueError("refaudio is required for clone mode")
+        if not reftext:
+            raise ValueError("reftext is required for clone mode")
+    else:
+        mode = MODE_CUSTOM_VOICE
+        if not speaker:
+            speaker = DEFAULT_SPEAKER
+
+    return VoiceContext(
+        mode=mode,
+        tts_model=tts_model,
+        language=language,
+        speaker=speaker,
+        instruct=instruct,
+        voice_design=voice_design,
+        refaudio=refaudio,
+        reftext=reftext,
+    )
+
+
+def _process_request(req: dict[str, Any]) -> RequestResult:
+    text = str(req.get("text", ""))
+    agent_name = str(req.get("agent", "main"))
     config_path = Path(str(req.get("openclawConfig", "")))
-    dots_tts_bin = Path(str(req.get("dotsTtsBinary", "")))
     token = str(req.get("openclawToken", ""))
 
     cfg = load_config(config_path)
@@ -142,13 +219,7 @@ def _process_request(req: dict[str, Any]) -> RequestResult:
 
     agent = cfg.resolve_agent(agent_name)
     openclaw_model = cfg.openclaw_model(agent)
-
-    if not refaudio:
-        raise ValueError("refaudio is required")
-    if not tts_model:
-        raise ValueError("tts model path is required")
-    if not dots_tts_bin.exists():
-        raise FileNotFoundError(f"dots-tts binary not found: {dots_tts_bin}")
+    voice = _parse_voice(req)
 
     slash = parse_slash_command(text)
     debug = bool(req.get("debug")) or debug_enabled()
@@ -157,10 +228,7 @@ def _process_request(req: dict[str, Any]) -> RequestResult:
             slash,
             agent=agent,
             openclaw_config=str(config_path),
-            refaudio=refaudio,
-            reftext=reftext,
-            tts_model=tts_model,
-            dots_tts_bin=dots_tts_bin,
+            voice=voice,
             debug=debug,
         )
         return RequestResult()
@@ -172,10 +240,7 @@ def _process_request(req: dict[str, Any]) -> RequestResult:
         agent=agent,
         openclaw_model=openclaw_model,
         openclaw_config=str(config_path),
-        refaudio=refaudio,
-        reftext=reftext,
-        tts_model=tts_model,
-        dots_tts_bin=dots_tts_bin,
+        voice=voice,
         debug=debug,
     )
 
@@ -184,18 +249,19 @@ def _cache_tts_paths(
     session: Session,
     *,
     openclaw_config: str,
-    refaudio: str,
-    reftext: str | None,
-    tts_model: str,
+    voice: VoiceContext,
     agent: str,
-    dots_tts_bin: Path,
 ) -> None:
     session.last_openclaw_config = openclaw_config
-    session.last_refaudio = refaudio
-    session.last_reftext = reftext
-    session.last_tts_model = tts_model
+    session.last_tts_model = voice.tts_model
+    session.last_voice_mode = voice.mode
+    session.last_language = voice.language
+    session.last_speaker = voice.speaker
+    session.last_instruct = voice.instruct
+    session.last_voice_design = voice.voice_design
+    session.last_refaudio = voice.refaudio
+    session.last_reftext = voice.reftext
     session.last_agent = agent
-    session.last_dots_tts = str(dots_tts_bin)
     save_session(session)
 
 
@@ -204,17 +270,14 @@ def _handle_slash(
     *,
     agent: str,
     openclaw_config: str,
-    refaudio: str,
-    reftext: str | None,
-    tts_model: str,
-    dots_tts_bin: Path,
+    voice: VoiceContext,
     debug: bool,
 ) -> None:
     session = load_session()
 
     if slash.kind == SlashKind.UNKNOWN:
         spoken = agent_error_line(f"unknown command {slash.raw_verb!r}")
-        _speak(spoken, refaudio=refaudio, reftext=reftext, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
+        _speak(spoken, voice=voice, debug=debug)
         raise ValueError(spoken)
 
     if slash.kind == SlashKind.NEW_SESSION:
@@ -222,15 +285,12 @@ def _handle_slash(
         _cache_tts_paths(
             session,
             openclaw_config=openclaw_config,
-            refaudio=refaudio,
-            reftext=reftext,
-            tts_model=tts_model,
+            voice=voice,
             agent=agent,
-            dots_tts_bin=dots_tts_bin,
         )
         spoken = confirmation_text(slash)
         eprint(f"[oc-interactive] new session {session.user_id}")
-        _speak(spoken, refaudio=refaudio, reftext=reftext, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
+        _speak(spoken, voice=voice, debug=debug)
         return
 
     if slash.kind == SlashKind.SET_SYSTEM_PROMPT:
@@ -238,31 +298,25 @@ def _handle_slash(
         _cache_tts_paths(
             session,
             openclaw_config=openclaw_config,
-            refaudio=refaudio,
-            reftext=reftext,
-            tts_model=tts_model,
+            voice=voice,
             agent=agent,
-            dots_tts_bin=dots_tts_bin,
         )
         spoken = confirmation_text(slash)
         eprint(
             f"[oc-interactive] system prompt {'set' if slash.value else 'cleared'}"
         )
-        _speak(spoken, refaudio=refaudio, reftext=reftext, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
+        _speak(spoken, voice=voice, debug=debug)
         return
 
     if slash.kind == SlashKind.HELP:
         _cache_tts_paths(
             session,
             openclaw_config=openclaw_config,
-            refaudio=refaudio,
-            reftext=reftext,
-            tts_model=tts_model,
+            voice=voice,
             agent=agent,
-            dots_tts_bin=dots_tts_bin,
         )
         spoken = confirmation_text(slash)
-        _speak(spoken, refaudio=refaudio, reftext=reftext, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
+        _speak(spoken, voice=voice, debug=debug)
         return
 
     if slash.kind == SlashKind.STATUS:
@@ -279,13 +333,10 @@ def _handle_slash(
         _cache_tts_paths(
             session,
             openclaw_config=openclaw_config,
-            refaudio=refaudio,
-            reftext=reftext,
-            tts_model=tts_model,
+            voice=voice,
             agent=agent,
-            dots_tts_bin=dots_tts_bin,
         )
-        _speak(spoken, refaudio=refaudio, reftext=reftext, tts_model=tts_model, dots_tts_bin=dots_tts_bin, debug=debug)
+        _speak(spoken, voice=voice, debug=debug)
         return
 
     raise ValueError(f"unhandled slash command: {slash.kind}")
@@ -299,19 +350,16 @@ def _handle_chat(
     agent: str,
     openclaw_model: str,
     openclaw_config: str,
-    refaudio: str,
-    reftext: str | None,
-    tts_model: str,
-    dots_tts_bin: Path,
+    voice: VoiceContext,
     debug: bool,
 ) -> RequestResult:
     session = load_session()
-    session.last_openclaw_config = openclaw_config
-    session.last_refaudio = refaudio
-    session.last_reftext = reftext
-    session.last_tts_model = tts_model
-    session.last_agent = agent
-    session.last_dots_tts = str(dots_tts_bin)
+    _cache_tts_paths(
+        session,
+        openclaw_config=openclaw_config,
+        voice=voice,
+        agent=agent,
+    )
 
     api_messages = build_api_messages(session, text)
 
@@ -344,16 +392,8 @@ def _handle_chat(
     append_assistant_message(session, spoken_raw, agent=agent)
     save_session(session)
 
-    spoken = tag_for_tts(spoken_raw)
-    eprint(f"[oc-interactive] speaking: {spoken[:80]}…")
-    _speak(
-        spoken,
-        refaudio=refaudio,
-        reftext=reftext,
-        tts_model=tts_model,
-        dots_tts_bin=dots_tts_bin,
-        debug=debug,
-    )
+    eprint(f"[oc-interactive] speaking: {spoken_raw[:80]}…")
+    _speak(spoken_raw, voice=voice, debug=debug)
     if openclaw_failed:
         return RequestResult(error=spoken_raw)
     return RequestResult(reply=spoken_raw)
@@ -362,19 +402,19 @@ def _handle_chat(
 def _speak(
     text: str,
     *,
-    refaudio: str,
-    reftext: str | None,
-    tts_model: str,
-    dots_tts_bin: Path,
+    voice: VoiceContext,
     debug: bool,
 ) -> None:
     try:
         synthesize_and_play(
             text,
-            refaudio=refaudio,
-            reftext=reftext,
-            model=tts_model,
-            dots_tts_bin=dots_tts_bin,
+            model=voice.tts_model,
+            mode=voice.mode,
+            language=voice.language,
+            speaker=voice.speaker,
+            instruct=voice.instruct,
+            refaudio=voice.refaudio,
+            reftext=voice.reftext,
             debug=debug,
         )
     except TTSError as e:

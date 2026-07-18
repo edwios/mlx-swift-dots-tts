@@ -7,7 +7,9 @@ if [[ ! -x "$BIN" ]]; then
   echo "oc-interactive not installed; run: cd $ROOT && make install" >&2
   exit 1
 fi
+echo "This will create a new session with default configuration."
+echo "If you just want to start a new conversation, or to change the configuration, use 'talk_eileen.sh'."
+echo "Press Enter to continue... or Ctrl+C to cancel."
+read -r
 exec "$BIN" \
-  --instruct "warm, friendly, and conversational with a British accent" \
-  -c ello.conf \
-  "$@"
+  --init --new "$@"

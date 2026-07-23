@@ -10,10 +10,12 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "mlx-audio[tts]>=0.4.5",
+    "textual>=0.60",
 ]
 
 [project.scripts]
 oc-interactive = "oc_interactive.cli:main"
+oc-interactive-chat = "oc_interactive.chat_app:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

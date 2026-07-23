@@ -288,6 +288,54 @@ oc-interactive -t "/history" > conversation.json
 | `--timeout SECONDS` | Max seconds to wait for agent reply and TTS (default: no timeout) |
 | `--debug` | Log OpenClaw/TTS timing and cache status (`OC_INTERACTIVE_DEBUG=1`) |
 
+## Chat UI
+
+A [Textual](https://github.com/Textualize/textual)-based chat window that
+stays open for the whole conversation, instead of one process per turn. User
+messages are right-aligned, agent replies are left-aligned, and existing
+`session.json` history is rendered on startup.
+
+```bash
+cd oc-interactive
+./run-chat --speaker Ryan --instruct "warm and conversational"
+```
+
+Or via `make`:
+
+```bash
+make run-chat ARGS='--speaker Ryan'
+```
+
+It accepts the same voice/config flags as `oc-interactive` (`--speaker`,
+`--instruct`, `--voice-design`, `-r`/`--refaudio`, `--reftext`, `-m`/`--model`,
+`-l`/`--language`, `--agent`, `-c`/`--config`, `--init`, `--new`, `--debug`) —
+just no `-t`/`--text`, since text is typed into the chat input instead. Voice
+playback still happens through the same background TTS daemon as the CLI; the
+chat window is a visual transcript layered on top, not a silent mode.
+
+Type a message and press Enter to send it. While a turn is in flight the
+input is disabled and the header subtitle shows `waiting for <agent>…`; the
+reply bubble appears as soon as the agent's text is ready, which is generally
+*before* its audio finishes playing.
+
+Slash commands work the same as the CLI's (`/new`, `/clear`, `/clean all`,
+`/system prompt …`, `/help`, `/status`), with two chat-only differences:
+
+- `/dump`, `/dump all`, `/history` write the JSON conversation history to
+  `~/.config/oc-interactive/exports/<timestamp>.json` instead of stdout (a
+  full-screen app can't print to stdout mid-session), and show the saved path
+  as a system message.
+- `/agent <name>` switches the agent used for subsequent turns without
+  restarting the app (validated against the same `agents` allowlist as
+  `--agent`). This command is local to the chat UI and isn't sent to the
+  daemon.
+
+Quit with `ctrl+q` or `ctrl+c`.
+
+Note: the chat input is a single-line box, so a multi-line `/system prompt`
+(as shown in [Slash commands](#slash-commands) above) is easiest to set from
+the one-shot CLI rather than typed directly into the chat window.
+
 ## State files
 
 Under `~/.config/oc-interactive/` (override with `OC_INTERACTIVE_STATE_DIR`):

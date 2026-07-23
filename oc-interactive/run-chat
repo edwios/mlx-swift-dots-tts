@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Run the oc-interactive chat UI from the repo without activating the venv or
+# adding to PATH. See ./run for the one-shot CLI equivalent.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+BIN="$ROOT/.venv/bin/oc-interactive-chat"
+if [[ ! -x "$BIN" ]]; then
+  echo "oc-interactive-chat not installed; run: cd $ROOT && make install" >&2
+  exit 1
+fi
+exec "$BIN" "$@"

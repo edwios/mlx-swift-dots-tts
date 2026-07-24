@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run oc-interactive with a CustomVoice speaker (Eileen-style defaults).
+# Run oc-interactive with a CustomVoice speaker (Victoria-style defaults).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BIN="$ROOT/.venv/bin/oc-interactive"
@@ -12,4 +12,4 @@ echo "If you just want to start a new conversation, or to change the configurati
 echo "Press Enter to continue... or Ctrl+C to cancel."
 read -r
 exec "$BIN" \
-  --init --new --config eileen.conf "$@"
+  --init --new --config victoria.conf "$@"

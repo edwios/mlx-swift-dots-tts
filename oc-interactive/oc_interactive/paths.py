@@ -59,6 +59,14 @@ def tts_daemon_log_path() -> Path:
     return state_dir() / TTS_DAEMON_LOG
 
 
+def ssh_tunnel_state_path(local_port: int) -> Path:
+    return state_dir() / f"ssh-tunnel-{local_port}.json"
+
+
+def ssh_tunnel_log_path(local_port: int) -> Path:
+    return state_dir() / f"ssh-tunnel-{local_port}.log"
+
+
 def debug_enabled(explicit: bool | None = None) -> bool:
     if explicit is not None:
         return explicit

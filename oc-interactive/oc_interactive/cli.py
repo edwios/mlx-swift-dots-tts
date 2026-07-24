@@ -16,11 +16,18 @@ from oc_interactive.session import (
     archive_and_new_session,
     clear_cached_settings,
     load_session,
+    save_session,
 )
 from oc_interactive.slash import (
     is_dump_command,
     is_slash_command,
     parse_slash_command,
+)
+from oc_interactive.ssh_tunnel import (
+    ensure_ssh_tunnel,
+    load_tunnel_spec,
+    teardown_tunnel,
+    tunnel_status,
 )
 from oc_interactive.turn import (
     build_payload,
@@ -182,6 +189,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Do not print the text sent to TTS (printed to stdout by default).",
     )
     p.add_argument(
+        "--ssh-tunnel-status",
+        action="store_true",
+        help="Print JSON health of the ssh tunnel declared in the config's ssh block, then exit.",
+    )
+    p.add_argument(
+        "--ssh-tunnel-teardown",
+        action="store_true",
+        help="Tear down the managed ssh tunnel declared in the config's ssh block, then exit.",
+    )
+    p.add_argument(
         "--daemon",
         action="store_true",
         help=argparse.SUPPRESS,
@@ -210,6 +227,37 @@ def _report_error(message: str) -> int:
     return 1
 
 
+def _handle_ssh_tunnel_flags(args: argparse.Namespace) -> int:
+    config_path = resolve_config_path(args)
+    try:
+        cfg = load_config(config_path)
+    except (FileNotFoundError, ValueError) as e:
+        return _report_error(str(e))
+
+    try:
+        spec = load_tunnel_spec(cfg.raw)
+    except ValueError as e:
+        return _report_error(str(e))
+
+    if spec is None:
+        eprint("[oc-interactive] no ssh block in config; nothing to manage")
+        return 0
+
+    if args.ssh_tunnel_teardown:
+        _, state = tunnel_status(spec)
+        had_tunnel = state is not None
+        teardown_tunnel(spec)
+        if had_tunnel:
+            eprint(f"[oc-interactive] tunnel on port {spec.local_port} torn down")
+        else:
+            eprint(f"[oc-interactive] no managed tunnel on port {spec.local_port}")
+        return 0
+
+    healthy, state = tunnel_status(spec)
+    print(json.dumps({"healthy": healthy, "state": state}, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -220,6 +268,9 @@ def main(argv: list[str] | None = None) -> int:
         from oc_interactive.qwen_tts_daemon import main as tts_daemon_main
 
         return tts_daemon_main()
+
+    if args.ssh_tunnel_status or args.ssh_tunnel_teardown:
+        return _handle_ssh_tunnel_flags(args)
 
     if args.new:
         session, archived = archive_and_new_session(keep_system_prompt=True)
@@ -239,6 +290,21 @@ def main(argv: list[str] | None = None) -> int:
     stdin_text = _read_stdin_text()
     # Allow `oc-interactive --new` / `--init` with no turn text.
     if (args.new or args.init) and args.text is None and stdin_text is None:
+        config_path = resolve_config_path(args)
+        try:
+            cfg = load_config(config_path)
+        except (FileNotFoundError, ValueError) as e:
+            return _report_error(str(e))
+        try:
+            ensure_ssh_tunnel(cfg, debug=args.debug)
+        except RuntimeError as e:
+            return _report_error(str(e))
+        # Persist config_path even without a turn, so later commands that omit
+        # -c/--config (e.g. run-chat, talk_eileen.sh) keep using this config
+        # instead of silently falling back to the default one.
+        session = load_session()
+        session.last_openclaw_config = str(config_path)
+        save_session(session)
         return 0
 
     if stdin_text is not None:
@@ -261,6 +327,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = load_config(config_path)
     except (FileNotFoundError, ValueError) as e:
+        return _report_error(str(e))
+
+    try:
+        ensure_ssh_tunnel(cfg, debug=args.debug)
+    except RuntimeError as e:
         return _report_error(str(e))
 
     try:

@@ -33,6 +33,7 @@ from oc_interactive.slash import (
     is_slash_command,
     parse_slash_command,
 )
+from oc_interactive.ssh_tunnel import ensure_ssh_tunnel
 from oc_interactive.turn import (
     VoiceSettings,
     build_payload,
@@ -382,6 +383,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = load_config(config_path)
     except (FileNotFoundError, ValueError) as e:
+        eprint(f"error: {e}")
+        return 1
+
+    try:
+        ensure_ssh_tunnel(cfg, debug=args.debug)
+    except RuntimeError as e:
         eprint(f"error: {e}")
         return 1
 

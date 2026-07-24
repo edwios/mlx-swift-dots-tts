@@ -11,7 +11,7 @@ Each conversational turn is a **separate shell invocation**. Two background daem
 
 - macOS on Apple Silicon
 - Python 3.11+
-- OpenClaw gateway reachable (SSH tunnel assumed already up if remote)
+- OpenClaw gateway reachable — if remote, add an `ssh` block to your config and oc-interactive will establish/repair the tunnel automatically (see [SSH tunnel management](#ssh-tunnel-management))
 - `ELLO_GATEWAY_TOKEN` environment variable
 
 ## Install
@@ -110,7 +110,7 @@ Edit paths as needed. Example:
 - `ttsInstruct`: optional default emotion/style instruction for CustomVoice (used when `--instruct` is omitted).
 - `ttsLanguage`: TTS language code (default `English`). Qwen3-TTS supports language ids such as `English`, `Chinese`, `Japanese`, `Korean`, `German`, `French`, `Spanish`, `Italian`, `Portuguese`, `Russian` — not regional variants like “British English”; put accent/dialect in `ttsInstruct` or `ttsVoiceDesign` instead.
 - `ttsVoiceDesign`: optional natural-language voice description. If set, VoiceDesign mode is used by default. **Takes priority over `ttsSpeaker` when both are defined.**
-- `ssh` block is informational only; start your tunnel separately.
+- `ssh` block: optional. When present, oc-interactive automatically establishes and repairs a local SSH port-forward tunnel on every invocation — see [SSH tunnel management](#ssh-tunnel-management).
 
 **CLI options override config.** Values in `oc-interactive.json` are defaults. Flags such as `--speaker`, `--instruct`, `--voice-design`, `-m` / `--model`, `-l` / `--language`, and `--agent` take precedence for that turn. Successful turns then cache the effective settings in `session.json`, so later turns can omit those flags until you override them again on the CLI.
 
@@ -138,6 +138,40 @@ Archives are written to `~/.config/oc-interactive/sessions/` when the current se
 
 ```bash
 export ELLO_GATEWAY_TOKEN=your-token
+```
+
+## SSH tunnel management
+
+If your OpenClaw gateway runs on another machine, add an `ssh` block to the config:
+
+```json
+"ssh": {
+  "enabled": true,
+  "host": "ello.local",
+  "user": "fsoc4",
+  "identityFile": "~/.ssh/id_ed25519",
+  "localPort": 18789,
+  "remoteHost": "127.0.0.1",
+  "remotePort": 18789
+}
+```
+
+`oc-interactive` and `oc-interactive-chat` check this block automatically on every invocation, right after loading the config — no separate command to remember:
+
+- If a matching tunnel is already up (same host/user/identity/remote target, port responding), nothing happens.
+- If the port is dead, the recorded process is gone, or the target has changed (e.g. you switched config files), the stale tunnel is torn down and a fresh one is established via `ssh -N -L <localPort>:<remoteHost>:<remotePort> [user@]host`.
+- If `enabled` is `false`, or there's no `ssh` block at all, this is a silent no-op — nothing changes for configs that don't need tunneling.
+- If `localPort` is already bound by something oc-interactive doesn't manage, or the tunnel can't be established (bad host, auth failure, etc.), the invocation fails with a clear error instead of silently proceeding against an unreachable gateway.
+
+Because this runs on every invocation — not just at session start — a dropped tunnel self-heals on the next turn without having to rerun an init script.
+
+State is kept per `localPort` under `~/.config/oc-interactive/`: `ssh-tunnel-<port>.json` (host/user/pid bookkeeping) and `ssh-tunnel-<port>.log` (the `ssh` process's own stdout/stderr, useful when a tunnel fails to establish).
+
+Manual inspection/control:
+
+```bash
+oc-interactive -c eileen.conf --ssh-tunnel-status
+oc-interactive -c eileen.conf --ssh-tunnel-teardown
 ```
 
 ## Voice modes
@@ -287,6 +321,8 @@ oc-interactive -t "/history" > conversation.json
 | `--new` | Archive the current session under `sessions/` (if it has messages) and start a new one; keeps system prompt and voice cache (alone or with a turn) |
 | `--timeout SECONDS` | Max seconds to wait for agent reply and TTS (default: no timeout) |
 | `--debug` | Log OpenClaw/TTS timing and cache status (`OC_INTERACTIVE_DEBUG=1`) |
+| `--ssh-tunnel-status` | Print JSON health of the config's `ssh` tunnel and exit (see [SSH tunnel management](#ssh-tunnel-management)) |
+| `--ssh-tunnel-teardown` | Tear down the managed `ssh` tunnel and exit |
 
 ## Chat UI
 
@@ -350,6 +386,8 @@ Under `~/.config/oc-interactive/` (override with `OC_INTERACTIVE_STATE_DIR`):
 | `tts-daemon.sock` | Unix socket to cached TTS daemon |
 | `tts-daemon.pid` | TTS daemon PID |
 | `tts-daemon.log` | TTS daemon logs (model load / synth timing) |
+| `ssh-tunnel-<port>.json` | Managed SSH tunnel bookkeeping (host/user/pid) for a config's `ssh.localPort`, if used |
+| `ssh-tunnel-<port>.log` | `ssh` process stdout/stderr for that tunnel |
 
 The orchestration daemon shuts down after 30 minutes idle; the next invocation restarts it. The TTS daemon has the same idle timeout but is restarted automatically when speech is needed.
 

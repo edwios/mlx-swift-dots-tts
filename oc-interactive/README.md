@@ -241,9 +241,18 @@ cat prompt.txt | oc-interactive -v
 
 If both stdin and `-t` are given, **stdin wins** and `-t` is ignored.
 
+### TTS text selection
+
+Before any text is handed to the speech synthesizer, oc-interactive checks the **first line** of it:
+
+- If that line is enclosed in square brackets (e.g. `[laughs]`, `[whispers something]`), only that line — with the `[` and `]` stripped — is actually synthesized into audio.
+- Otherwise, the **full text** is synthesized unchanged.
+
+This only affects what gets spoken out loud. Everywhere else — stdout, the chat UI transcript, `-v`/`--verbose`, and `session.json` history — always shows/stores the **full, unmodified** text, regardless of whether a bracketed first line caused only part of it to be spoken. It applies to every kind of spoken text: agent replies, slash-command confirmations (`/new`, `/system prompt`, `/help`, `/status`), and agent-error lines.
+
 ### Verbose and quiet output
 
-By default, the full text sent to TTS is printed to **stdout** as soon as the agent reply is ready (before synthesis/playback). Use `-q` / `--quiet` to suppress that.
+By default, the full reply text is printed to **stdout** as soon as the agent reply is ready (before synthesis/playback) — this is the same full text described in [TTS text selection](#tts-text-selection), even if only part of it (a bracketed first line) ends up being spoken. Use `-q` / `--quiet` to suppress that.
 
 Use `-v` / `--verbose` to also print the OpenClaw agent reply to **stdout** after a successful chat turn:
 

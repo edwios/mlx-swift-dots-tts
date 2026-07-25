@@ -37,7 +37,7 @@ from oc_interactive.slash import (
     confirmation_text,
     parse_slash_command,
 )
-from oc_interactive.speakable import agent_error_line, ensure_utf8
+from oc_interactive.speakable import agent_error_line, ensure_utf8, select_tts_text
 from oc_interactive.tts import TTSError, synthesize_and_play
 from oc_interactive.tts_defaults import (
     DEFAULT_LANGUAGE,
@@ -453,10 +453,12 @@ def _speak(
     is_error: bool = False,
 ) -> None:
     _ = quiet  # CLI enforces quiet when printing the streamed ttsText event
+    # The full text is always displayed/printed/stored; only the audio
+    # synthesis input is trimmed by the bracket rule.
     _emit_tts_text(conn, text, is_error=is_error)
     try:
         synthesize_and_play(
-            text,
+            select_tts_text(text),
             model=voice.tts_model,
             mode=voice.mode,
             language=voice.language,

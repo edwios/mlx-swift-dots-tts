@@ -348,6 +348,8 @@ oc-interactive -t "What's in the news?" --speaker Ryan --agent news
 
 Permitted agents: `main`, `news`, `eileen` (from config). Default: `main` → `openclaw/main`.
 
+Once a turn switches agents (via `--agent` or `/agent <name>`), that choice is cached as `lastAgent` in `session.json`. Restarting `oc-interactive` / `oc-interactive-chat` (e.g. via `run-chat`) without `--agent` resumes that cached agent instead of falling back to the config's `defaultAgent` — so a restored session keeps talking to the same agent it was using before. Pass `--agent` explicitly to override it, or `--init` to clear the cache back to the config default.
+
 ### Slash commands
 
 | Command | Effect |

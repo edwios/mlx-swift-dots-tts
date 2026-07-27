@@ -421,7 +421,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        agent = cfg.resolve_agent(args.agent)
+        # Fall back to the agent the session was last talking to (set by
+        # /agent or a previous --agent) so restoring a session on restart
+        # doesn't silently snap back to the config's default agent.
+        agent = cfg.resolve_agent(args.agent or load_session().last_agent)
     except ValueError as e:
         eprint(f"error: {e}")
         return 1

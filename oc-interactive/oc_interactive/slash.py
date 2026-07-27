@@ -9,6 +9,7 @@ from enum import Enum, auto
 class SlashKind(Enum):
     NEW_SESSION = auto()
     SET_SYSTEM_PROMPT = auto()
+    SET_VOICE_DESIGN = auto()
     HELP = auto()
     STATUS = auto()
     DUMP_HISTORY = auto()
@@ -27,6 +28,8 @@ _VERBS: list[tuple[str, SlashKind]] = [
     ("dump all", SlashKind.DUMP_HISTORY),
     ("clean all", SlashKind.NEW_SESSION),
     ("system prompt", SlashKind.SET_SYSTEM_PROMPT),
+    ("voice design", SlashKind.SET_VOICE_DESIGN),
+    ("voice-design", SlashKind.SET_VOICE_DESIGN),
     ("history", SlashKind.DUMP_HISTORY),
     ("status", SlashKind.STATUS),
     ("clear", SlashKind.NEW_SESSION),
@@ -34,6 +37,9 @@ _VERBS: list[tuple[str, SlashKind]] = [
     ("dump", SlashKind.DUMP_HISTORY),
     ("new", SlashKind.NEW_SESSION),
 ]
+
+# Verbs whose value may span multiple lines (same-line text + following lines).
+_MULTILINE_VALUE_KINDS = (SlashKind.SET_SYSTEM_PROMPT, SlashKind.SET_VOICE_DESIGN)
 
 
 def is_slash_command(text: str) -> bool:
@@ -59,7 +65,7 @@ def parse_slash_command(text: str) -> SlashCommand | None:
 
     for verb, kind in _VERBS:
         if lower_remainder == verb:
-            if kind == SlashKind.SET_SYSTEM_PROMPT:
+            if kind in _MULTILINE_VALUE_KINDS:
                 value = tail.strip()
             else:
                 value = ""
@@ -68,7 +74,7 @@ def parse_slash_command(text: str) -> SlashCommand | None:
         prefix = verb + " "
         if lower_remainder.startswith(prefix):
             same_line = remainder[len(prefix) :].strip()
-            if kind == SlashKind.SET_SYSTEM_PROMPT:
+            if kind in _MULTILINE_VALUE_KINDS:
                 parts = [same_line, tail.strip()]
                 value = "\n".join(p for p in parts if p).strip()
             else:
@@ -79,7 +85,35 @@ def parse_slash_command(text: str) -> SlashCommand | None:
     return SlashCommand(kind=SlashKind.UNKNOWN, raw_verb=first_word or remainder)
 
 
-def confirmation_text(cmd: SlashCommand, *, message_count: int = 0) -> str:
+# Base commands supported everywhere (one-shot CLI and chat UI, via the daemon).
+_HELP_COMMANDS: list[str] = [
+    "new",
+    "clear",
+    "clean all",
+    "system prompt",
+    "voice design",
+    "help",
+    "status",
+    "dump",
+    "dump all",
+    "history",
+]
+
+
+def _join_commands(commands: list[str]) -> str:
+    if not commands:
+        return ""
+    if len(commands) == 1:
+        return commands[0]
+    return ", ".join(commands[:-1]) + ", and " + commands[-1]
+
+
+def confirmation_text(
+    cmd: SlashCommand,
+    *,
+    message_count: int = 0,
+    extra_commands: list[str] | None = None,
+) -> str:
     if cmd.kind == SlashKind.NEW_SESSION:
         return "New session started."
     if cmd.kind == SlashKind.SET_SYSTEM_PROMPT:
@@ -88,11 +122,18 @@ def confirmation_text(cmd: SlashCommand, *, message_count: int = 0) -> str:
             if not cmd.value
             else "System prompt updated."
         )
+    if cmd.kind == SlashKind.SET_VOICE_DESIGN:
+        # daemon.py builds the actual spoken confirmation (it cites the
+        # current description, or names the resulting speaker/model); this
+        # is a generic fallback only.
+        if not cmd.value:
+            return "Current voice design requested."
+        if cmd.value.strip().lower() in ("reset", "default"):
+            return "Voice design reset."
+        return "Voice design updated."
     if cmd.kind == SlashKind.HELP:
-        return (
-            "Commands: new, clear, clean all, system prompt, help, status, "
-            "dump, dump all, and history."
-        )
+        commands = _HELP_COMMANDS + list(extra_commands or [])
+        return f"Commands: {_join_commands(commands)}."
     if cmd.kind == SlashKind.STATUS:
         return f"Session active. {message_count} messages."
     return ""

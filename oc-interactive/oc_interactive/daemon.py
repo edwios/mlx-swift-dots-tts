@@ -47,6 +47,7 @@ from oc_interactive.tts_defaults import (
     MODE_CUSTOM_VOICE,
     MODE_VOICE_DESIGN,
 )
+from oc_interactive.turn import ensure_model_matches_mode
 
 
 @dataclass
@@ -54,6 +55,9 @@ class RequestResult:
     reply: str | None = None
     error: str | None = None
     tts_text: str | None = None
+    # Set only by bare `/voice-design`: the chat UI prefills its input box
+    # with this text so the current description is easy to tweak.
+    voice_design_prefill: str | None = None
 
 
 @dataclass(frozen=True)
@@ -143,6 +147,8 @@ def _handle_connection(conn: socket.socket) -> dict[str, Any]:
     # ttsText is streamed before playback; include on final for older clients.
     if result.tts_text is not None:
         response["ttsText"] = result.tts_text
+    if result.voice_design_prefill is not None:
+        response["voiceDesignPrefill"] = result.voice_design_prefill
     return response
 
 
@@ -251,15 +257,19 @@ def _process_request(
     slash = parse_slash_command(text)
     debug = bool(req.get("debug")) or debug_enabled()
     quiet = bool(req.get("quiet"))
+    extra_help_commands_raw = req.get("extraHelpCommands") or []
+    extra_help_commands = [str(c) for c in extra_help_commands_raw if str(c).strip()]
     if slash is not None:
         return _handle_slash(
             slash,
+            cfg=cfg,
             agent=agent,
             openclaw_config=str(config_path),
             voice=voice,
             debug=debug,
             quiet=quiet,
             conn=conn,
+            extra_help_commands=extra_help_commands,
         )
 
     return _handle_chat(
@@ -299,12 +309,14 @@ def _cache_tts_paths(
 def _handle_slash(
     slash,
     *,
+    cfg: OpenClawConfig,
     agent: str,
     openclaw_config: str,
     voice: VoiceContext,
     debug: bool,
     quiet: bool,
     conn: socket.socket | None = None,
+    extra_help_commands: list[str] | None = None,
 ) -> RequestResult:
     session = load_session()
 
@@ -343,6 +355,105 @@ def _handle_slash(
         _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
         return RequestResult(tts_text=spoken)
 
+    if slash.kind == SlashKind.SET_VOICE_DESIGN:
+        description = slash.value.strip()
+        lower = description.lower()
+
+        if not description:
+            # Bare: cite the current description back, no state change.
+            if voice.mode == MODE_VOICE_DESIGN and voice.voice_design:
+                current = voice.voice_design
+                spoken = f"Current voice design: {current}"
+                prefill = f"/voice-design {current}"
+            else:
+                fallback_speaker = voice.speaker or DEFAULT_SPEAKER
+                spoken = (
+                    "No voice design is currently set; using "
+                    f"{fallback_speaker}, CustomVoice."
+                )
+                prefill = "/voice-design "
+            _cache_tts_paths(
+                session,
+                openclaw_config=openclaw_config,
+                voice=voice,
+                agent=agent,
+            )
+            _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
+            return RequestResult(tts_text=spoken, voice_design_prefill=prefill)
+
+        if lower in ("reset", "default"):
+            cfg_design = cfg.tts_voice_design
+            if cfg_design:
+                model = ensure_model_matches_mode(
+                    voice.tts_model, MODE_VOICE_DESIGN, explicit_cli_model=False
+                )
+                new_voice = VoiceContext(
+                    mode=MODE_VOICE_DESIGN,
+                    tts_model=model,
+                    language=voice.language,
+                    speaker=None,
+                    instruct=cfg_design,
+                    voice_design=cfg_design,
+                    refaudio=None,
+                    reftext=None,
+                )
+                spoken = f"Voice design reset to config default: {cfg_design}"
+                eprint(f"[oc-interactive] voice design reset to config default: {cfg_design!r}")
+            else:
+                speaker = cfg.tts_speaker or DEFAULT_SPEAKER
+                instruct = cfg.tts_instruct
+                model = ensure_model_matches_mode(
+                    voice.tts_model, MODE_CUSTOM_VOICE, explicit_cli_model=False
+                )
+                new_voice = VoiceContext(
+                    mode=MODE_CUSTOM_VOICE,
+                    tts_model=model,
+                    language=voice.language,
+                    speaker=speaker,
+                    instruct=instruct,
+                    voice_design=None,
+                    refaudio=None,
+                    reftext=None,
+                )
+                spoken = f"No config voice design; reset to {speaker}, CustomVoice."
+                eprint(
+                    "[oc-interactive] voice design reset; no config default, "
+                    "reverted to CustomVoice"
+                )
+            _cache_tts_paths(
+                session,
+                openclaw_config=openclaw_config,
+                voice=new_voice,
+                agent=agent,
+            )
+            _speak(spoken, voice=new_voice, debug=debug, quiet=quiet, conn=conn)
+            return RequestResult(tts_text=spoken)
+
+        # Normal set: switch to VoiceDesign mode with this description.
+        model = ensure_model_matches_mode(
+            voice.tts_model, MODE_VOICE_DESIGN, explicit_cli_model=False
+        )
+        new_voice = VoiceContext(
+            mode=MODE_VOICE_DESIGN,
+            tts_model=model,
+            language=voice.language,
+            speaker=None,
+            instruct=description,
+            voice_design=description,
+            refaudio=None,
+            reftext=None,
+        )
+        spoken = "Voice design updated."
+        eprint(f"[oc-interactive] voice design set: {description!r}")
+        _cache_tts_paths(
+            session,
+            openclaw_config=openclaw_config,
+            voice=new_voice,
+            agent=agent,
+        )
+        _speak(spoken, voice=new_voice, debug=debug, quiet=quiet, conn=conn)
+        return RequestResult(tts_text=spoken)
+
     if slash.kind == SlashKind.HELP:
         _cache_tts_paths(
             session,
@@ -350,7 +461,7 @@ def _handle_slash(
             voice=voice,
             agent=agent,
         )
-        spoken = confirmation_text(slash)
+        spoken = confirmation_text(slash, extra_commands=extra_help_commands)
         _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
         return RequestResult(tts_text=spoken)
 

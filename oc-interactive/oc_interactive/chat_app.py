@@ -39,6 +39,7 @@ from oc_interactive.turn import (
     build_payload,
     resolve_config_path,
     resolve_voice,
+    voice_from_session,
 )
 from oc_interactive.paths import default_config_path, state_dir
 from oc_interactive.tts_defaults import DEFAULT_LANGUAGE, DEFAULT_SPEAKER, DEFAULT_TTS_MODEL
@@ -142,7 +143,23 @@ class ChatApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield VerticalScroll(id="message-log")
-        yield Input(placeholder="Message the agent… (/help for commands)", id="chat-input")
+        yield Input(placeholder=self._input_placeholder(), id="chat-input")
+
+    def _input_placeholder(self) -> str:
+        return f"Message {self.current_agent}… (/help for commands)"
+
+    def _update_input_placeholder(self) -> None:
+        self.query_one("#chat-input", Input).placeholder = self._input_placeholder()
+
+    def _prefill_input(self, text: str) -> None:
+        """Fill the chat input with ``text`` and place the cursor at the end.
+
+        Used after a bare ``/voice-design`` so the current description is
+        ready to tweak instead of having to be retyped from scratch.
+        """
+        input_widget = self.query_one("#chat-input", Input)
+        input_widget.value = text
+        input_widget.cursor_position = len(text)
 
     def on_mount(self) -> None:
         self.sub_title = f"agent: {self.current_agent}"
@@ -230,6 +247,7 @@ class ChatApp(App):
             return
         self.current_agent = resolved
         self.sub_title = f"agent: {self.current_agent}"
+        self._update_input_placeholder()
         self._append_bubble(f"Switched to agent {resolved}.", classes="system")
 
     # -- daemon round-trip -------------------------------------------------
@@ -254,6 +272,7 @@ class ChatApp(App):
             token=self.cfg.token,
             debug=self.oc_debug,
             quiet=True,
+            extra_help_commands=["agent"],
         )
 
         def on_event(msg: dict) -> None:
@@ -279,8 +298,17 @@ class ChatApp(App):
             self.call_from_thread(self._append_bubble, f"Connection error: {e}", classes="error")
             resp = None
 
-        if resp is not None and resp.get("ok") and is_new_session:
-            self.call_from_thread(self._clear_message_log)
+        if resp is not None and resp.get("ok"):
+            if is_new_session:
+                self.call_from_thread(self._clear_message_log)
+            # Re-sync from session.json: slash commands like /voice-design
+            # change the voice server-side, and self.voice must not keep
+            # reusing the snapshot resolved once at startup, or later turns
+            # (and a later bare /voice-design) would silently use stale data.
+            self.voice = voice_from_session(load_session())
+            prefill = resp.get("voiceDesignPrefill")
+            if isinstance(prefill, str) and prefill:
+                self.call_from_thread(self._prefill_input, prefill)
 
         self.call_from_thread(self._set_waiting, False)
 

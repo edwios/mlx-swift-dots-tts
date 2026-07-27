@@ -248,7 +248,7 @@ Before any text is handed to the speech synthesizer, oc-interactive checks the *
 - If that line is enclosed in square brackets (e.g. `[laughs]`, `[whispers something]`), only that line — with the `[` and `]` stripped — is actually synthesized into audio.
 - Otherwise, the **full text** is synthesized unchanged.
 
-This only affects what gets spoken out loud. Everywhere else — stdout, the chat UI transcript, `-v`/`--verbose`, and `session.json` history — always shows/stores the **full, unmodified** text, regardless of whether a bracketed first line caused only part of it to be spoken. It applies to every kind of spoken text: agent replies, slash-command confirmations (`/new`, `/system prompt`, `/help`, `/status`), and agent-error lines.
+This only affects what gets spoken out loud. Everywhere else — stdout, the chat UI transcript, `-v`/`--verbose`, and `session.json` history — always shows/stores the **full, unmodified** text, regardless of whether a bracketed first line caused only part of it to be spoken. It applies to every kind of spoken text: agent replies, slash-command confirmations (`/new`, `/system prompt`, `/voice-design`, `/help`, `/status`), and agent-error lines.
 
 ### Verbose and quiet output
 
@@ -299,6 +299,9 @@ Permitted agents: `main`, `news`, `eileen` (from config). Default: `main` → `o
 |---------|--------|
 | `/new`, `/clear`, `/clean all` | New session (archives current if it has messages; clears history; keeps system prompt) |
 | `/system prompt …` | Set multi-line system prompt (empty clears it) |
+| `/voice-design …` (alias `/voice design …`) | Switch to VoiceDesign mode with this description — same effect as `--voice-design`, and it persists in `session.json` exactly as if passed on the CLI, so later turns keep using it with no flag needed. Auto-switches to a VoiceDesign checkpoint if the cached model doesn't already match. |
+| `/voice-design` (bare) | Cites the current voice design back (or reports that none is set) without changing anything. |
+| `/voice-design reset` / `/voice-design default` | Reset the voice design to the config's `ttsVoiceDesign`; if the config has none, reverts to CustomVoice using `ttsSpeaker`/`ttsInstruct`. |
 | `/help` | Spoken command summary |
 | `/status` | Spoken session summary |
 | `/dump`, `/dump all`, `/history` | JSON conversation history on **stdout** (no audio) |
@@ -306,6 +309,9 @@ Permitted agents: `main`, `news`, `eileen` (from config). Default: `main` → `o
 ```bash
 oc-interactive -t "/new" --speaker Ryan
 oc-interactive -t $'/system prompt\nYou are concise.\nUse British English.' --speaker Ryan
+oc-interactive -t "/voice-design A warm British woman with a soft, calm tone" --speaker Ryan
+oc-interactive -t "/voice-design"        # cite the current description
+oc-interactive -t "/voice-design reset"  # back to the config's ttsVoiceDesign (or CustomVoice)
 oc-interactive -t "/history" > conversation.json
 ```
 
@@ -358,13 +364,20 @@ just no `-t`/`--text`, since text is typed into the chat input instead. Voice
 playback still happens through the same background TTS daemon as the CLI; the
 chat window is a visual transcript layered on top, not a silent mode.
 
+These flags only seed the *first* turn. Voice settings resolved at startup are
+resynced from `session.json` after every turn (chat or slash command), so
+mid-session changes — e.g. `/voice-design …` — take effect immediately for
+the next reply and for a following bare `/voice-design`, instead of the app
+holding onto its startup snapshot for the rest of the session.
+
 Type a message and press Enter to send it. While a turn is in flight the
 input is disabled and the header subtitle shows `waiting for <agent>…`; the
 reply bubble appears as soon as the agent's text is ready, which is generally
 *before* its audio finishes playing.
 
 Slash commands work the same as the CLI's (`/new`, `/clear`, `/clean all`,
-`/system prompt …`, `/help`, `/status`), with two chat-only differences:
+`/system prompt …`, `/voice-design …`, `/help`, `/status`), with three
+chat-only differences:
 
 - `/dump`, `/dump all`, `/history` write the JSON conversation history to
   `~/.config/oc-interactive/exports/<timestamp>.json` instead of stdout (a
@@ -374,6 +387,11 @@ Slash commands work the same as the CLI's (`/new`, `/clear`, `/clean all`,
   restarting the app (validated against the same `agents` allowlist as
   `--agent`). This command is local to the chat UI and isn't sent to the
   daemon.
+- Bare `/voice-design` additionally pre-fills the chat input with
+  `/voice-design <current description>` (or just `/voice-design ` if none is
+  set), so you can tweak it without retyping it from scratch. The one-shot
+  CLI has no input box to prefill, so only the spoken/citation part applies
+  there.
 
 Quit with `ctrl+q` or `ctrl+c`.
 

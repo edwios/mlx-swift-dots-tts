@@ -40,6 +40,30 @@ class VoiceSettings:
     reftext: str | None = None
 
 
+def voice_from_session(session: Session) -> VoiceSettings:
+    """Rebuild ``VoiceSettings`` straight from cached session fields.
+
+    ``resolve_voice`` is only correct for resolving the *first* turn of a
+    process (CLI flags vs. session cache vs. config). Long-running clients
+    (the chat UI) must not keep reusing that first resolution forever:
+    slash commands like ``/voice-design`` change the voice server-side and
+    persist the result via the daemon's ``_cache_tts_paths``, so after any
+    successful turn the session file — not a stale in-memory snapshot — is
+    the source of truth for what to send next.
+    """
+    return VoiceSettings(
+        mode=session.last_voice_mode or DEFAULT_MODE,
+        tts_model=session.last_tts_model or DEFAULT_TTS_MODEL,
+        language=session.last_language or DEFAULT_LANGUAGE,
+        speaker=session.last_speaker,
+        instruct=session.last_instruct,
+        voice_design=session.last_voice_design,
+        refaudio=session.last_refaudio,
+        reftext=session.last_reftext,
+    )
+
+
+
 def resolve_model_string(model: str) -> str:
     """Keep HF repo ids as-is; resolve local paths."""
     raw = model.strip()
@@ -272,6 +296,7 @@ def build_payload(
     token: str,
     debug: bool,
     quiet: bool,
+    extra_help_commands: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "text": text,
@@ -288,4 +313,5 @@ def build_payload(
         "openclawToken": token,
         "debug": debug_enabled(debug),
         "quiet": bool(quiet),
+        "extraHelpCommands": list(extra_help_commands or []),
     }

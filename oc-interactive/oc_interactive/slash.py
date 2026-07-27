@@ -10,6 +10,8 @@ class SlashKind(Enum):
     NEW_SESSION = auto()
     SET_SYSTEM_PROMPT = auto()
     SET_VOICE_DESIGN = auto()
+    SET_FILTER = auto()
+    SAVE_CONFIG = auto()
     HELP = auto()
     STATUS = auto()
     DUMP_HISTORY = auto()
@@ -33,13 +35,20 @@ _VERBS: list[tuple[str, SlashKind]] = [
     ("history", SlashKind.DUMP_HISTORY),
     ("status", SlashKind.STATUS),
     ("clear", SlashKind.NEW_SESSION),
+    ("filter", SlashKind.SET_FILTER),
+    ("save-config", SlashKind.SAVE_CONFIG),
+    ("save config", SlashKind.SAVE_CONFIG),
     ("help", SlashKind.HELP),
     ("dump", SlashKind.DUMP_HISTORY),
     ("new", SlashKind.NEW_SESSION),
 ]
 
 # Verbs whose value may span multiple lines (same-line text + following lines).
-_MULTILINE_VALUE_KINDS = (SlashKind.SET_SYSTEM_PROMPT, SlashKind.SET_VOICE_DESIGN)
+_MULTILINE_VALUE_KINDS = (
+    SlashKind.SET_SYSTEM_PROMPT,
+    SlashKind.SET_VOICE_DESIGN,
+    SlashKind.SET_FILTER,
+)
 
 
 def is_slash_command(text: str) -> bool:
@@ -92,6 +101,8 @@ _HELP_COMMANDS: list[str] = [
     "clean all",
     "system prompt",
     "voice design",
+    "filter",
+    "save-config",
     "help",
     "status",
     "dump",
@@ -131,6 +142,22 @@ def confirmation_text(
         if cmd.value.strip().lower() in ("reset", "default"):
             return "Voice design reset."
         return "Voice design updated."
+    if cmd.kind == SlashKind.SET_FILTER:
+        # daemon.py builds the actual spoken confirmation (it cites on/off
+        # state and the current description, or names what changed); this
+        # is a generic fallback only.
+        value = cmd.value.strip().lower()
+        if not value:
+            return "Filter status requested."
+        if value == "on":
+            return "Filter enabled."
+        if value == "off":
+            return "Filter disabled."
+        return "Filter description updated."
+    if cmd.kind == SlashKind.SAVE_CONFIG:
+        # daemon.py builds the actual spoken confirmation (it lists what was
+        # saved, or reports a write failure); this is a generic fallback only.
+        return "Config saved."
     if cmd.kind == SlashKind.HELP:
         commands = _HELP_COMMANDS + list(extra_commands or [])
         return f"Commands: {_join_commands(commands)}."

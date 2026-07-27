@@ -7,5 +7,9 @@
   "ttsSpeaker": "Ryan",
   "ttsInstruct": null,
   "ttsLanguage": "English",
-  "ttsVoiceDesign": null
+  "ttsVoiceDesign": null,
+  "filterBaseURL": null,
+  "filterModel": null,
+  "filterPrompt": null,
+  "filterEnabled": false
 }

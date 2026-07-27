@@ -306,7 +306,7 @@ class ChatApp(App):
             # reusing the snapshot resolved once at startup, or later turns
             # (and a later bare /voice-design) would silently use stale data.
             self.voice = voice_from_session(load_session())
-            prefill = resp.get("voiceDesignPrefill")
+            prefill = resp.get("voiceDesignPrefill") or resp.get("filterPrefill")
             if isinstance(prefill, str) and prefill:
                 self.call_from_thread(self._prefill_input, prefill)
 

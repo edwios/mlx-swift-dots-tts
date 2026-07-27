@@ -35,6 +35,11 @@ class Session:
     last_voice_design: str | None = None
     last_language: str | None = None
     last_openclaw_config: str | None = None
+    # None = never explicitly toggled this session -> defer to the config's
+    # filterEnabled/filterPrompt default (see config.py, daemon._effective_filter_*).
+    # An explicit /filter on|off or /filter <description> always overrides it.
+    filter_enabled: bool | None = None
+    filter_prompt: str | None = None
     messages: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
@@ -52,6 +57,14 @@ class Session:
             last_voice_design=data.get("lastVoiceDesign"),
             last_language=data.get("lastLanguage"),
             last_openclaw_config=data.get("lastOpenclawConfig"),
+            # Preserve None (unset -> use config default) vs. an explicit
+            # True/False previously written by /filter on|off.
+            filter_enabled=(
+                data.get("filterEnabled")
+                if isinstance(data.get("filterEnabled"), bool)
+                else None
+            ),
+            filter_prompt=data.get("filterPrompt") or None,
             messages=list(data.get("messages") or []),
         )
 
@@ -82,6 +95,13 @@ class Session:
             out["lastLanguage"] = self.last_language
         if self.last_openclaw_config:
             out["lastOpenclawConfig"] = self.last_openclaw_config
+        if self.filter_enabled is not None:
+            # Written explicitly (True or False) only once /filter on|off has
+            # been used this session; omitted while still None so config's
+            # filterEnabled default keeps applying.
+            out["filterEnabled"] = self.filter_enabled
+        if self.filter_prompt:
+            out["filterPrompt"] = self.filter_prompt
         return out
 
     def dump_document(self, agent: str | None = None) -> dict[str, Any]:
@@ -134,6 +154,8 @@ def new_session(*, keep_system_prompt: bool = True) -> Session:
         last_voice_design=current.last_voice_design,
         last_language=current.last_language,
         last_openclaw_config=current.last_openclaw_config,
+        filter_enabled=current.filter_enabled,
+        filter_prompt=current.filter_prompt,
         messages=[],
     )
 
@@ -174,7 +196,14 @@ def archive_and_new_session(*, keep_system_prompt: bool = True) -> tuple[Session
 
 
 def clear_cached_settings(session: Session | None = None) -> Session:
-    """Drop cached voice/agent/config paths; keep conversation and system prompt."""
+    """Drop cached voice/agent/config/filter settings; keep conversation and
+    system prompt.
+
+    filter_enabled/filter_prompt are reset to None (unset) here, same as the
+    voice settings below, since both now have a config-file default (unlike
+    system_prompt, which has no config default and is never touched by
+    --init).
+    """
     s = session or load_session()
     s.last_agent = None
     s.last_refaudio = None
@@ -186,6 +215,8 @@ def clear_cached_settings(session: Session | None = None) -> Session:
     s.last_voice_design = None
     s.last_language = None
     s.last_openclaw_config = None
+    s.filter_enabled = None
+    s.filter_prompt = None
     save_session(s)
     return s
 

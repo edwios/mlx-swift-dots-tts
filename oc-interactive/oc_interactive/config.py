@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from oc_interactive.filter_defaults import (
+    DEFAULT_FILTER_BASE_URL,
+    DEFAULT_FILTER_MODEL,
+)
 from oc_interactive.tts_defaults import (
     DEFAULT_LANGUAGE,
     DEFAULT_SPEAKER,
@@ -29,6 +33,10 @@ class OpenClawConfig:
     tts_instruct: str | None
     tts_language: str
     tts_voice_design: str | None
+    filter_base_url: str
+    filter_model: str
+    filter_prompt: str | None
+    filter_enabled: bool
     raw: dict[str, Any]
 
     def resolve_agent(self, name: str | None) -> str:
@@ -138,6 +146,37 @@ def load_config(path: Path) -> OpenClawConfig:
     else:
         tts_voice_design = None
 
+    filter_base_url_raw = raw.get("filterBaseURL")
+    filter_base_url = (
+        str(filter_base_url_raw).strip().rstrip("/")
+        if isinstance(filter_base_url_raw, str) and filter_base_url_raw.strip()
+        else DEFAULT_FILTER_BASE_URL
+    )
+
+    filter_model_raw = raw.get("filterModel")
+    filter_model = (
+        str(filter_model_raw).strip()
+        if isinstance(filter_model_raw, str) and filter_model_raw.strip()
+        else DEFAULT_FILTER_MODEL
+    )
+
+    # filterPrompt: default system prompt for the /filter LLM. json.load already
+    # decodes any "\n" written in the config file into a real newline, same as
+    # any other JSON string -- no extra unescaping needed here (unlike the
+    # run-chat single-line-input workaround handled in daemon.py).
+    filter_prompt_raw = raw.get("filterPrompt")
+    filter_prompt = (
+        filter_prompt_raw.strip() or None
+        if isinstance(filter_prompt_raw, str)
+        else None
+    )
+
+    # filterEnabled: default on/off state for a session that hasn't explicitly
+    # run /filter on or /filter off yet. Explicit session state (see session.py)
+    # always overrides this once set.
+    filter_enabled_raw = raw.get("filterEnabled")
+    filter_enabled = bool(filter_enabled_raw) if isinstance(filter_enabled_raw, bool) else False
+
     return OpenClawConfig(
         base_url=base_url,
         token=token,
@@ -148,5 +187,30 @@ def load_config(path: Path) -> OpenClawConfig:
         tts_instruct=tts_instruct,
         tts_language=tts_language,
         tts_voice_design=tts_voice_design,
+        filter_base_url=filter_base_url,
+        filter_model=filter_model,
+        filter_prompt=filter_prompt,
+        filter_enabled=filter_enabled,
         raw=raw,
     )
+
+
+def update_config_file(path: Path, updates: dict[str, Any]) -> None:
+    """Merge ``updates`` into the on-disk JSON config, preserving every other key.
+
+    Used by the `/filter` slash command (see daemon.py) so `filterEnabled` /
+    `filterPrompt` changes become this config file's new default going
+    forward -- not just a per-session override in session.json. Writes
+    atomically (temp file + rename), same pattern as session.py.
+    """
+    with path.open(encoding="utf-8") as f:
+        raw: dict[str, Any] = json.load(f)
+    raw.update(updates)
+
+    payload = json.dumps(raw, indent=2, ensure_ascii=False) + "\n"
+    tmp = path.with_name(path.name + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        f.write(payload)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)

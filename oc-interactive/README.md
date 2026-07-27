@@ -99,7 +99,11 @@ Edit paths as needed. Example:
   "ttsSpeaker": "Ryan",
   "ttsInstruct": null,
   "ttsLanguage": "English",
-  "ttsVoiceDesign": null
+  "ttsVoiceDesign": null,
+  "filterBaseURL": null,
+  "filterModel": null,
+  "filterPrompt": null,
+  "filterEnabled": false
 }
 ```
 
@@ -110,9 +114,32 @@ Edit paths as needed. Example:
 - `ttsInstruct`: optional default emotion/style instruction for CustomVoice (used when `--instruct` is omitted).
 - `ttsLanguage`: TTS language code (default `English`). Qwen3-TTS supports language ids such as `English`, `Chinese`, `Japanese`, `Korean`, `German`, `French`, `Spanish`, `Italian`, `Portuguese`, `Russian` — not regional variants like “British English”; put accent/dialect in `ttsInstruct` or `ttsVoiceDesign` instead.
 - `ttsVoiceDesign`: optional natural-language voice description. If set, VoiceDesign mode is used by default. **Takes priority over `ttsSpeaker` when both are defined.**
+- `filterBaseURL` / `filterModel`: optional overrides for the local LLM text-filter server (see [Text filter](#text-filter-local-llm)). Defaults to an LM Studio instance at `http://10.0.1.29:22206` running `qwen3.5-2b-uncensored-hauhaucs-aggressive-mlx` when omitted/`null`.
+- `filterPrompt` / `filterEnabled`: optional defaults for the filter's system prompt and on/off state. Used only until a session explicitly runs `/filter <description>` / `/filter on` / `/filter off`, at which point the session value wins (same precedence as `ttsVoiceDesign` vs. `/voice-design`). `--init` clears the session override and reverts to these config defaults. Run `/save-config` (below) to make a session's current filter settings — or agent/language/voice-design — the new config default.
 - `ssh` block: optional. When present, oc-interactive automatically establishes and repairs a local SSH port-forward tunnel on every invocation — see [SSH tunnel management](#ssh-tunnel-management).
 
 **CLI options override config.** Values in `oc-interactive.json` are defaults. Flags such as `--speaker`, `--instruct`, `--voice-design`, `-m` / `--model`, `-l` / `--language`, and `--agent` take precedence for that turn. Successful turns then cache the effective settings in `session.json`, so later turns can omit those flags until you override them again on the CLI.
+
+### Saving settings back to the config file
+
+Everything above (`ttsVoiceDesign`, `ttsLanguage`, `defaultAgent`, `filterPrompt`/`filterEnabled`) is read from the config file as a *default*, then only ever cached per-session in `session.json` — the config file itself is never modified automatically. To make your current session's settings the new default for that config file (e.g. after tweaking `/voice-design` or `/filter` interactively and deciding you want to keep it), run:
+
+```bash
+oc-interactive -t "/save-config"
+```
+
+This writes into whichever config file the session is using (the default path, or whatever `-c`/`--config` points at) — merging in just these keys and leaving everything else (tokens, agents list, TTS speaker/instruct/model, ssh block, etc.) untouched:
+
+| Key written | From |
+|-------------|------|
+| `defaultAgent` | The agent currently in use this turn |
+| `ttsLanguage` | The current language |
+| `ttsVoiceDesign` | The current voice design description — only written if VoiceDesign mode is currently active; left alone otherwise |
+| `filterEnabled` / `filterPrompt` | The filter's current effective on/off state and description |
+
+`ttsSpeaker` / `ttsInstruct` / `ttsModel` / clone (`refaudio`/`reftext`) settings are **not** currently written by `/save-config` — if you're using CustomVoice or Clone mode day to day, those still need to be edited into the config file by hand (or passed as CLI flags each time).
+
+The daemon speaks back a summary of what was saved (e.g. "Config saved: agent victoria, language English, voice design, filter on."), or an error if the file couldn't be written (permissions, disk full, etc.) — the session itself is unaffected either way.
 
 To discard the session cache and reload from the config file (default `~/.config/oc-interactive/oc-interactive.json`, or `-c` if given):
 
@@ -248,7 +275,35 @@ Before any text is handed to the speech synthesizer, oc-interactive checks the *
 - If that line is enclosed in square brackets (e.g. `[laughs]`, `[whispers something]`), only that line — with the `[` and `]` stripped — is actually synthesized into audio.
 - Otherwise, the **full text** is synthesized unchanged.
 
-This only affects what gets spoken out loud. Everywhere else — stdout, the chat UI transcript, `-v`/`--verbose`, and `session.json` history — always shows/stores the **full, unmodified** text, regardless of whether a bracketed first line caused only part of it to be spoken. It applies to every kind of spoken text: agent replies, slash-command confirmations (`/new`, `/system prompt`, `/voice-design`, `/help`, `/status`), and agent-error lines.
+This only affects what gets spoken out loud. Everywhere else — stdout, the chat UI transcript, `-v`/`--verbose`, and `session.json` history — always shows/stores the **full, unmodified** text, regardless of whether a bracketed first line caused only part of it to be spoken. It applies to every kind of spoken text: agent replies, slash-command confirmations (`/new`, `/system prompt`, `/voice-design`, `/filter`, `/save-config`, `/help`, `/status`), and agent-error lines.
+
+### Text filter (local LLM)
+
+Optionally, whatever text would be spoken (i.e. after the bracket-selection rule above) can be routed through a separate local LLM first, and its reply is what actually gets synthesized — for tone rewriting, redaction, simplification, etc. This uses an OpenAI-compatible `/v1/chat/completions` endpoint such as [LM Studio](https://lmstudio.ai/docs/developer/rest); the target server/model are set via `filterBaseURL` / `filterModel` in the config (see [Configuration](#configuration)).
+
+Controlled with the `/filter` slash command:
+
+| Command | Effect |
+|---------|--------|
+| `/filter on` | Enable routing: text to be spoken is sent to the filter LLM first, and its reply is what's synthesized. |
+| `/filter off` (default) | Disable routing: text is sent to TTS directly, unchanged. |
+| `/filter <description>` | Set the filter LLM's system prompt (the transformation to apply). Independent of on/off — setting a description does not itself enable the filter. |
+| `/filter` (bare) | Speaks/reports the current on/off state and description, and (in the chat UI) pre-fills the input with `/filter <description>` so it's easy to tweak. |
+
+```bash
+oc-interactive -t "/filter Rewrite this to sound calm and reassuring, keep it brief." --speaker Ryan
+oc-interactive -t "/filter on"
+oc-interactive -t "/filter"    # report current state + description
+oc-interactive -t "/filter off"
+```
+
+Notes:
+
+- Only real agent replies are ever routed through the filter — slash-command confirmations and agent-error lines are always spoken unfiltered.
+- The filter is display-transparent, same as the bracket rule: stdout, the chat transcript, and `session.json` history always show the agent's original, unfiltered reply. Only the audio actually synthesized reflects the filtered text.
+- If the filter LLM is unreachable, times out, or returns a malformed reply, oc-interactive logs the error (`daemon.log`) and falls back to speaking the original unfiltered text for that turn — a filter-server hiccup never blocks speech.
+- On/off state and the description persist in `session.json` like the system prompt (survive `/new`); only an explicit `/filter on` / `/filter off` / `/filter <description>` changes them for this session. `--init` clears the session override and reverts to the config's `filterEnabled`/`filterPrompt` defaults. None of this touches the config file itself — run `/save-config` (see [Saving settings back to the config file](#saving-settings-back-to-the-config-file)) if you want the current filter settings to become that config's new default.
+- The chat UI's input box is single-line, so it can't take a real line break. Type a literal `\n` where you want one (e.g. `/filter Rewrite calmly.\nKeep it under two sentences.`) — it's stored as a genuine newline in the system prompt sent to the filter LLM, not as literal backslash-n text. Bare `/filter` reverses this when pre-filling the input, so an existing multi-line description round-trips back to the same `\n`-separated text instead of being cut at the first line.
 
 ### Verbose and quiet output
 
@@ -302,6 +357,10 @@ Permitted agents: `main`, `news`, `eileen` (from config). Default: `main` → `o
 | `/voice-design …` (alias `/voice design …`) | Switch to VoiceDesign mode with this description — same effect as `--voice-design`, and it persists in `session.json` exactly as if passed on the CLI, so later turns keep using it with no flag needed. Auto-switches to a VoiceDesign checkpoint if the cached model doesn't already match. |
 | `/voice-design` (bare) | Cites the current voice design back (or reports that none is set) without changing anything. |
 | `/voice-design reset` / `/voice-design default` | Reset the voice design to the config's `ttsVoiceDesign`; if the config has none, reverts to CustomVoice using `ttsSpeaker`/`ttsInstruct`. |
+| `/filter on` / `/filter off` | Enable/disable routing spoken text through the local filter LLM before TTS (see [Text filter](#text-filter-local-llm)) |
+| `/filter <description>` | Set the filter LLM's system prompt; independent of on/off |
+| `/filter` (bare) | Report current on/off state + description |
+| `/save-config` (alias `/save config`) | Write the current agent, language, voice design (if active), and filter settings into the active config file as its new defaults — see [Saving settings back to the config file](#saving-settings-back-to-the-config-file) |
 | `/help` | Spoken command summary |
 | `/status` | Spoken session summary |
 | `/dump`, `/dump all`, `/history` | JSON conversation history on **stdout** (no audio) |
@@ -312,6 +371,9 @@ oc-interactive -t $'/system prompt\nYou are concise.\nUse British English.' --sp
 oc-interactive -t "/voice-design A warm British woman with a soft, calm tone" --speaker Ryan
 oc-interactive -t "/voice-design"        # cite the current description
 oc-interactive -t "/voice-design reset"  # back to the config's ttsVoiceDesign (or CustomVoice)
+oc-interactive -t "/filter Rewrite calmly and briefly." --speaker Ryan
+oc-interactive -t "/filter on"
+oc-interactive -t "/save-config"  # bake the above into the active config file
 oc-interactive -t "/history" > conversation.json
 ```
 
@@ -376,8 +438,8 @@ reply bubble appears as soon as the agent's text is ready, which is generally
 *before* its audio finishes playing.
 
 Slash commands work the same as the CLI's (`/new`, `/clear`, `/clean all`,
-`/system prompt …`, `/voice-design …`, `/help`, `/status`), with three
-chat-only differences:
+`/system prompt …`, `/voice-design …`, `/filter …`, `/save-config`, `/help`,
+`/status`), with three chat-only differences:
 
 - `/dump`, `/dump all`, `/history` write the JSON conversation history to
   `~/.config/oc-interactive/exports/<timestamp>.json` instead of stdout (a
@@ -392,6 +454,8 @@ chat-only differences:
   set), so you can tweak it without retyping it from scratch. The one-shot
   CLI has no input box to prefill, so only the spoken/citation part applies
   there.
+- Bare `/filter` does the same for the filter description: pre-fills
+  `/filter <current description>` (or `/filter ` if none is set).
 
 Quit with `ctrl+q` or `ctrl+c`.
 
@@ -405,7 +469,7 @@ Under `~/.config/oc-interactive/` (override with `OC_INTERACTIVE_STATE_DIR`):
 
 | File | Purpose |
 |------|---------|
-| `session.json` | Conversation history, system prompt, cached voice settings / model / config |
+| `session.json` | Conversation history, system prompt, cached voice settings / model / config, filter on/off + description |
 | `sessions/` | Archived sessions from `--new` / `/new` (timestamped JSON copies) |
 | `daemon.sock` | Unix socket IPC |
 | `daemon.pid` | Background daemon PID |

@@ -14,7 +14,11 @@ from pathlib import Path
 from typing import Any
 
 from oc_interactive.client import IDLE_TIMEOUT_SEC, REQUEST_TIMEOUT_SEC
-from oc_interactive.config import OpenClawConfig, load_config, update_config_file
+from oc_interactive.config import (
+    OpenClawConfig,
+    load_config,
+    write_default_config_snapshot,
+)
 from oc_interactive.io import eprint
 from oc_interactive.llm_filter import FilterError, filter_text
 from oc_interactive.openclaw import OpenClawError, chat_completion
@@ -567,21 +571,25 @@ def _handle_slash(
         return RequestResult(tts_text=spoken)
 
     if slash.kind == SlashKind.SAVE_CONFIG:
-        # Snapshot the current effective settings into the *default* config
-        # file (~/.config/oc-interactive/oc-interactive.json, see
-        # paths.default_config_path) so they become that file's defaults
-        # going forward -- an explicit, on-demand version of what /filter
-        # used to do automatically. Deliberately narrow in scope: agent,
-        # language, voice design (only if that's the mode in use), and the
-        # filter. Speaker/instruct/model/clone settings are left untouched
-        # for now.
+        # Replace the *default* config file (~/.config/oc-interactive/
+        # oc-interactive.json, see paths.default_config_path) with a full,
+        # current snapshot of whichever config this session is actually
+        # using (cfg.raw) -- that's the whole point of /save-config: make
+        # the default an up-to-date copy of "whatever I'm running right
+        # now", not a merge with whatever stale content happened to already
+        # be sitting there. defaultAgent / language / voice design (if
+        # active) / filter settings are overridden on top of that snapshot
+        # with their current *effective* (session) values, since those can
+        # differ from the active config's own defaults (e.g. after
+        # /voice-design or /filter this session, before saving).
         #
-        # This is always the default path, never whichever file was passed
-        # via -c/--config: that file (e.g. a named per-persona config like
-        # victoria.conf) is the user's own and oc-interactive must never
-        # write to it. If the default file doesn't exist yet, it's seeded
-        # from a copy of the currently active config (cfg.raw) so the
-        # result is an immediately usable standalone config.
+        # This always writes the default path, never whichever file was
+        # passed via -c/--config: that file (e.g. a named per-persona
+        # config like victoria.conf) is the user's own and oc-interactive
+        # must never write to it. Which config counts as "active" for a
+        # turn is unchanged by any of this: -c/--config wins, else the
+        # last session's cached config path, else this same default path
+        # (see turn.resolve_config_path).
         save_path = default_config_path()
         effective_enabled = _effective_filter_enabled(cfg, session)
         effective_prompt = _effective_filter_prompt(cfg, session)
@@ -598,7 +606,7 @@ def _handle_slash(
 
         try:
             ensure_state_dir()
-            update_config_file(save_path, updates, seed=cfg.raw)
+            write_default_config_snapshot(save_path, cfg.raw, updates)
         except (OSError, ValueError) as e:
             spoken = agent_error_line(f"failed to save config, {e}")
             eprint(f"[oc-interactive] /save-config failed for {save_path}: {e}")

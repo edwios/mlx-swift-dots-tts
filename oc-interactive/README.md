@@ -128,18 +128,18 @@ Everything above (`ttsVoiceDesign`, `ttsLanguage`, `defaultAgent`, `filterPrompt
 oc-interactive -t "/save-config"
 ```
 
-**This always writes to the *default* config path, `~/.config/oc-interactive/oc-interactive.json` (override with `OC_INTERACTIVE_STATE_DIR`) — never to whichever file was passed via `-c`/`--config`.** oc-interactive never modifies a `-c`/`--config` file (e.g. a named per-persona config like `eileen.conf`/`victoria.conf`); that file is yours to edit by hand. If you're running with `-c` day to day (as the `*_init.sh` launcher scripts do), `/save-config` still only affects `oc-interactive.json`, so re-running with `-c` again won't pick up what you just saved unless you also add it to that `-c` file yourself.
+**This always writes to the *default* config path, `~/.config/oc-interactive/oc-interactive.json` (override with `OC_INTERACTIVE_STATE_DIR`) — never to whichever file was passed via `-c`/`--config`.** oc-interactive never modifies a `-c`/`--config` file (e.g. a named per-persona config like `eileen.conf`/`victoria.conf`); that file is yours to edit by hand.
 
-If `oc-interactive.json` doesn't exist yet, `/save-config` creates it by copying the full contents of the config currently in use (so it's an immediately usable standalone config, not missing `openclawBaseURL`/`openclawToken`), then applies the updates below. If it already exists, only these keys are merged in — everything else in it is left untouched:
+`/save-config` **replaces** `oc-interactive.json` with a full, current snapshot of whichever config this session is actually using — not a merge with whatever was already there. Any stale settings left over in `oc-interactive.json` from a previously-active, different config are discarded, not preserved. Concretely: `openclawBaseURL`, `openclawToken`, `agents`, `ttsModel`, `ttsSpeaker`, `ttsInstruct`, `ssh`, `filterBaseURL`, `filterModel`, etc. are all copied as-is from the config in use (`-c`/`--config`, or whichever config the session last cached, or `oc-interactive.json` itself if that's what's active); the keys below are overridden on top with their current *effective* (session) values, since those can differ from that config's own defaults (e.g. after `/voice-design` or `/filter` this session):
 
-| Key written | From |
+| Key overridden with the session's effective value | From |
 |-------------|------|
 | `defaultAgent` | The agent currently in use this turn |
 | `ttsLanguage` | The current language |
-| `ttsVoiceDesign` | The current voice design description — only written if VoiceDesign mode is currently active; left alone otherwise |
+| `ttsVoiceDesign` | The current voice design description — only overridden if VoiceDesign mode is currently active; otherwise copied as-is from the active config |
 | `filterEnabled` / `filterPrompt` | The filter's current effective on/off state and description |
 
-`ttsSpeaker` / `ttsInstruct` / `ttsModel` / clone (`refaudio`/`reftext`) settings are **not** currently written by `/save-config` — if you're using CustomVoice or Clone mode day to day, those still need to be edited into the config file by hand (or passed as CLI flags each time).
+Since it's a full snapshot, `oc-interactive.json` after `/save-config` is effectively a copy of whichever config you last ran it from (plus those session overrides) — so if you run with `-c`/`--config` day to day (as the `*_init.sh` launcher scripts do), `/save-config` still writes to `oc-interactive.json` only, but its contents will match that `-c` file except for the fields above.
 
 The daemon speaks back a summary of what was saved, including the path it wrote to (e.g. "Config saved to /Users/you/.config/oc-interactive/oc-interactive.json: agent victoria, language English, voice design, filter on."), or an error if the file couldn't be written (permissions, disk full, etc.) — the session itself is unaffected either way.
 

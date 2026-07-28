@@ -214,37 +214,33 @@ def load_config(path: Path) -> OpenClawConfig:
     )
 
 
-def update_config_file(
+def write_default_config_snapshot(
     path: Path,
+    base: dict[str, Any],
     updates: dict[str, Any],
-    *,
-    seed: dict[str, Any] | None = None,
 ) -> None:
-    """Merge ``updates`` into the on-disk JSON config, preserving every other key.
+    """Replace the on-disk default config with a full snapshot of ``base``
+    (the raw contents of whichever config is currently active) plus
+    ``updates`` layered on top.
 
-    Used by `/save-config` (see daemon.py) so `defaultAgent` / `ttsLanguage` /
-    `ttsVoiceDesign` / `filterEnabled` / `filterPrompt` changes become this
-    config file's new defaults going forward -- not just a per-session
-    override in session.json. Writes atomically (temp file + rename), same
-    pattern as session.py.
-
-    ``path`` is always the *default* config path (``~/.config/oc-interactive/
-    oc-interactive.json``, see ``paths.default_config_path``) -- never
-    whichever file was passed via `-c`/`--config`, which oc-interactive must
-    never write to. If that default file doesn't exist yet, it's created
-    from a copy of ``seed`` (the currently active config's raw contents)
-    with ``updates`` applied on top, so the result is an immediately usable
-    standalone config rather than a partial one missing required keys like
-    `openclawBaseURL`/`openclawToken`. Without a ``seed``, a missing file is
-    an error.
+    Used by `/save-config` (see daemon.py): this is a *replace*, not a
+    merge -- whatever was previously at ``path`` (e.g. stale settings left
+    over from a different config that was active in an earlier session) is
+    fully discarded, not preserved. ``path`` is always the default config
+    path (``~/.config/oc-interactive/oc-interactive.json``, see
+    ``paths.default_config_path``) -- never whichever file was passed via
+    `-c`/`--config`, which oc-interactive must never write to. ``updates``
+    carries the handful of fields that reflect the current *effective*
+    session settings rather than the active config's own defaults --
+    `defaultAgent` / `ttsLanguage` / `ttsVoiceDesign` (if in use) /
+    `filterEnabled` / `filterPrompt`; everything else in the resulting file
+    (`openclawBaseURL`, `openclawToken`, `agents`, `ttsModel`, `ttsSpeaker`,
+    `ttsInstruct`, `ssh`, `filterBaseURL`, `filterModel`, ...) is copied
+    as-is from ``base``, so the default config always ends up a full,
+    current mirror of whichever config you last ran `/save-config` from.
+    Writes atomically (temp file + rename), same pattern as session.py.
     """
-    if path.exists():
-        with path.open(encoding="utf-8") as f:
-            raw: dict[str, Any] = json.load(f)
-    elif seed is not None:
-        raw = dict(seed)
-    else:
-        raise FileNotFoundError(f"oc-interactive config not found: {path}")
+    raw = dict(base)
     raw.update(updates)
 
     path.parent.mkdir(parents=True, exist_ok=True)

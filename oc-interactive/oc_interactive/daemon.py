@@ -31,6 +31,7 @@ from oc_interactive.session import (
     archive_and_new_session,
     build_api_messages,
     load_session,
+    save_active_agent,
     save_session,
 )
 from oc_interactive.slash import (
@@ -281,6 +282,10 @@ def _process_request(
         token = cfg.token
 
     agent = cfg.resolve_agent(agent_name)
+    # Every processed request (turn or slash command) re-affirms which agent
+    # is "current", so a plain relaunch of the CLI/chat UI with no --agent
+    # restores this same agent's own session next time.
+    save_active_agent(agent)
     openclaw_model = cfg.openclaw_model(agent)
     voice = _parse_voice(req)
 
@@ -333,7 +338,7 @@ def _cache_tts_paths(
     session.last_refaudio = voice.refaudio
     session.last_reftext = voice.reftext
     session.last_agent = agent
-    save_session(session)
+    save_session(session, agent)
 
 
 def _handle_slash(
@@ -348,7 +353,7 @@ def _handle_slash(
     conn: socket.socket | None = None,
     extra_help_commands: list[str] | None = None,
 ) -> RequestResult:
-    session = load_session()
+    session = load_session(agent)
 
     if slash.kind == SlashKind.UNKNOWN:
         spoken = agent_error_line(f"unknown command {slash.raw_verb!r}")
@@ -356,7 +361,7 @@ def _handle_slash(
         raise ValueError(spoken)
 
     if slash.kind == SlashKind.NEW_SESSION:
-        session, archived = archive_and_new_session(keep_system_prompt=True)
+        session, archived = archive_and_new_session(agent, keep_system_prompt=True)
         _cache_tts_paths(
             session,
             openclaw_config=openclaw_config,
@@ -649,7 +654,7 @@ def _handle_chat(
     quiet: bool,
     conn: socket.socket | None = None,
 ) -> RequestResult:
-    session = load_session()
+    session = load_session(agent)
     _cache_tts_paths(
         session,
         openclaw_config=openclaw_config,
@@ -686,7 +691,7 @@ def _handle_chat(
 
     append_user_message(session, text)
     append_assistant_message(session, spoken_raw, agent=agent)
-    save_session(session)
+    save_session(session, agent)
 
     filter_ctx = FilterContext(
         enabled=_effective_filter_enabled(cfg, session),

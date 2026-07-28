@@ -1,4 +1,13 @@
-"""Session state persisted in session.json."""
+"""Session state, persisted per-agent under agents/<agent>/session.json.
+
+Each OpenClaw agent (main, news, eileen, ...) gets its own session file, its
+own conversation history, its own cached voice/system-prompt/filter/config
+settings, and its own archive directory. A small separate pointer file
+(``active_agent.json``) records which agent's session is "current" so a
+launch with no ``--agent`` restores the right one, and so a mid-chat
+``/agent <name>`` switch is remembered the next time any oc-interactive
+entry point starts.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +19,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from oc_interactive.paths import ensure_state_dir, session_path, sessions_dir
+from oc_interactive.paths import (
+    active_agent_path,
+    agent_session_path,
+    agent_sessions_archive_dir,
+    ensure_state_dir,
+    normalize_agent_name,
+    session_path,
+)
 
 
 def _utc_now() -> str:
@@ -19,6 +35,17 @@ def _utc_now() -> str:
 
 def _new_user_id() -> str:
     return f"oc-interactive:{uuid.uuid4()}"
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+    tmp = path.with_name(path.name + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
 
 
 @dataclass
@@ -118,33 +145,34 @@ class Session:
         return doc
 
 
-def load_session(path: Path | None = None) -> Session:
-    p = path or session_path()
+def load_session(agent: str, path: Path | None = None) -> Session:
+    """Load the session belonging to ``agent``.
+
+    Runs the one-time legacy migration first (see
+    ``_migrate_legacy_session``) so an old flat ``session.json`` from
+    before sessions were split per-agent isn't silently orphaned.
+    """
+    _migrate_legacy_session()
+    p = path or agent_session_path(agent)
     if not p.exists():
-        return Session()
+        return Session(last_agent=normalize_agent_name(agent) or None)
     with p.open(encoding="utf-8") as f:
         data = json.load(f)
     return Session.from_dict(data)
 
 
-def save_session(session: Session, path: Path | None = None) -> None:
+def save_session(session: Session, agent: str, path: Path | None = None) -> None:
     ensure_state_dir()
-    p = path or session_path()
-    tmp = p.with_suffix(".json.tmp")
-    payload = json.dumps(session.to_dict(), indent=2, ensure_ascii=False) + "\n"
-    with tmp.open("w", encoding="utf-8") as f:
-        f.write(payload)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, p)
+    p = path or agent_session_path(agent)
+    _atomic_write_json(p, session.to_dict())
 
 
-def new_session(*, keep_system_prompt: bool = True) -> Session:
-    current = load_session()
+def new_session(agent: str, *, keep_system_prompt: bool = True) -> Session:
+    current = load_session(agent)
     return Session(
         user_id=_new_user_id(),
         system_prompt=current.system_prompt if keep_system_prompt else None,
-        last_agent=current.last_agent,
+        last_agent=normalize_agent_name(agent) or agent,
         last_refaudio=current.last_refaudio,
         last_reftext=current.last_reftext,
         last_tts_model=current.last_tts_model,
@@ -160,65 +188,99 @@ def new_session(*, keep_system_prompt: bool = True) -> Session:
     )
 
 
-def archive_current_session(session: Session | None = None) -> Path | None:
-    """Write the current session under sessions/ if it has messages.
+def archive_current_session(agent: str, session: Session | None = None) -> Path | None:
+    """Write ``agent``'s current session under its archive/ dir if it has
+    messages.
 
     Returns the archive path, or None when there was nothing to archive.
     """
-    current = session or load_session()
+    current = session or load_session(agent)
     if not current.messages:
         return None
 
     ensure_state_dir()
-    archive_root = sessions_dir()
+    archive_root = agent_sessions_archive_dir(agent)
     archive_root.mkdir(parents=True, exist_ok=True)
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     safe_id = current.user_id.replace(":", "_").replace("/", "_")
     dest = archive_root / f"{stamp}_{safe_id}.json"
-    payload = json.dumps(current.to_dict(), indent=2, ensure_ascii=False) + "\n"
-    tmp = dest.with_suffix(".json.tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        f.write(payload)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, dest)
+    _atomic_write_json(dest, current.to_dict())
     return dest
 
 
-def archive_and_new_session(*, keep_system_prompt: bool = True) -> tuple[Session, Path | None]:
-    """Archive the current session (if it has messages) and start a new one."""
-    current = load_session()
-    archived = archive_current_session(current)
-    session = new_session(keep_system_prompt=keep_system_prompt)
-    save_session(session)
+def archive_and_new_session(
+    agent: str, *, keep_system_prompt: bool = True
+) -> tuple[Session, Path | None]:
+    """Archive ``agent``'s current session (if it has messages) and start a
+    new one for that same agent. Cached voice/system-prompt/filter/config
+    settings carry over; only the conversation resets. Other agents'
+    sessions are untouched."""
+    current = load_session(agent)
+    archived = archive_current_session(agent, current)
+    session = new_session(agent, keep_system_prompt=keep_system_prompt)
+    save_session(session, agent)
     return session, archived
 
 
-def clear_cached_settings(session: Session | None = None) -> Session:
-    """Drop cached voice/agent/config/filter settings; keep conversation and
-    system prompt.
-
-    filter_enabled/filter_prompt are reset to None (unset) here, same as the
-    voice settings below, since both now have a config-file default (unlike
-    system_prompt, which has no config default and is never touched by
-    --init).
+def reset_session(agent: str) -> tuple[Session, Path | None]:
+    """Archive ``agent``'s current session (if it has messages) and replace
+    it with a completely blank one -- no cached voice/system-prompt/filter/
+    config carried over. This is the harder reset used by ``--init``,
+    versus ``archive_and_new_session`` (``/new``) which keeps those caches.
     """
-    s = session or load_session()
-    s.last_agent = None
-    s.last_refaudio = None
-    s.last_reftext = None
-    s.last_tts_model = None
-    s.last_speaker = None
-    s.last_instruct = None
-    s.last_voice_mode = None
-    s.last_voice_design = None
-    s.last_language = None
-    s.last_openclaw_config = None
-    s.filter_enabled = None
-    s.filter_prompt = None
-    save_session(s)
-    return s
+    current = load_session(agent)
+    archived = archive_current_session(agent, current)
+    norm = normalize_agent_name(agent) or agent
+    session = Session(last_agent=norm)
+    save_session(session, norm)
+    return session, archived
+
+
+def reset_all_agents(agents: list[str]) -> dict[str, Path | None]:
+    """Reset every agent in ``agents`` (see ``reset_session``) and clear the
+    active-agent pointer, so the next launch without --agent falls back to
+    the config's defaultAgent instead of a stale pointer. Returns a map of
+    normalized agent name -> archive path (None if nothing to archive)."""
+    archived: dict[str, Path | None] = {}
+    seen: set[str] = set()
+    for agent in agents:
+        norm = normalize_agent_name(agent)
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        _, path = reset_session(norm)
+        archived[norm] = path
+    clear_active_agent()
+    return archived
+
+
+def load_active_agent() -> str | None:
+    """Return the agent name the last turn (anywhere) was talking to, or
+    None if there's no cached pointer yet."""
+    _migrate_legacy_session()
+    p = active_agent_path()
+    if not p.exists():
+        return None
+    try:
+        with p.open(encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    agent = data.get("agent")
+    return agent if isinstance(agent, str) and agent else None
+
+
+def save_active_agent(agent: str) -> None:
+    ensure_state_dir()
+    norm = normalize_agent_name(agent) or agent
+    _atomic_write_json(active_agent_path(), {"agent": norm})
+
+
+def clear_active_agent() -> None:
+    p = active_agent_path()
+    if p.exists():
+        p.unlink()
 
 
 def append_user_message(session: Session, content: str) -> None:
@@ -252,3 +314,30 @@ def build_api_messages(session: Session, new_user_text: str) -> list[dict[str, s
             out.append({"role": role, "content": content})
     out.append({"role": "user", "content": new_user_text})
     return out
+
+
+def _migrate_legacy_session() -> None:
+    """One-time migration of the pre-per-agent flat ``session.json`` into
+    the new ``agents/<agent>/session.json`` layout.
+
+    No-ops immediately once the legacy file has been renamed away (first
+    call after upgrade), so this is cheap to call defensively from every
+    session/active-agent read.
+    """
+    legacy = session_path()
+    if not legacy.exists():
+        return
+    try:
+        with legacy.open(encoding="utf-8") as f:
+            data = json.load(f)
+        legacy_session = Session.from_dict(data)
+    except (OSError, json.JSONDecodeError):
+        legacy.rename(legacy.with_name(legacy.name + ".migrate-failed"))
+        return
+
+    agent = normalize_agent_name(legacy_session.last_agent) or "main"
+    dest = agent_session_path(agent)
+    if not dest.exists():
+        save_session(legacy_session, agent)
+        save_active_agent(agent)
+    legacy.rename(legacy.with_name(legacy.name + ".migrated"))

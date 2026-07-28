@@ -24,8 +24,11 @@ from oc_interactive.config import OpenClawConfig, load_config
 from oc_interactive.io import CliError, eprint
 from oc_interactive.session import (
     archive_and_new_session,
-    clear_cached_settings,
+    load_active_agent,
     load_session,
+    reset_all_agents,
+    save_active_agent,
+    save_session,
 )
 from oc_interactive.slash import (
     SlashKind,
@@ -63,7 +66,7 @@ def _export_history(*, agent: str) -> Path:
     to stdout, which would corrupt a full-screen Textual app, so this writes
     to a file instead.
     """
-    session = load_session()
+    session = load_session(agent)
     doc = session.dump_document(agent=agent)
     exports_dir = state_dir() / "exports"
     exports_dir.mkdir(parents=True, exist_ok=True)
@@ -175,7 +178,7 @@ class ChatApp(App):
         return self.query_one("#message-log", VerticalScroll)
 
     def _render_history(self) -> None:
-        session = load_session()
+        session = load_session(self.current_agent)
         log = self._message_log()
         for msg in session.messages:
             role = msg.get("role")
@@ -246,6 +249,13 @@ class ChatApp(App):
             self._append_bubble(str(e), classes="error")
             return
         self.current_agent = resolved
+        save_active_agent(resolved)
+        # Sessions are per-agent: switching agents means switching to that
+        # agent's own conversation and cached voice, not just relabeling the
+        # one on screen -- so the visible log is replaced with its history.
+        self._clear_message_log()
+        self._render_history()
+        self.voice = voice_from_session(load_session(resolved))
         self.sub_title = f"agent: {self.current_agent}"
         self._update_input_placeholder()
         self._append_bubble(f"Switched to agent {resolved}.", classes="system")
@@ -305,7 +315,7 @@ class ChatApp(App):
             # change the voice server-side, and self.voice must not keep
             # reusing the snapshot resolved once at startup, or later turns
             # (and a later bare /voice-design) would silently use stale data.
-            self.voice = voice_from_session(load_session())
+            self.voice = voice_from_session(load_session(self.current_agent))
             prefill = resp.get("voiceDesignPrefill") or resp.get("filterPrefill")
             if isinstance(prefill, str) and prefill:
                 self.call_from_thread(self._prefill_input, prefill)
@@ -378,12 +388,20 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--init",
         action="store_true",
-        help="Forget cached voice/agent/config settings and reload defaults from the config file.",
+        help=(
+            "Reset every agent's session (archiving each one first if it has "
+            "messages) and reload config defaults. Clears all agents' "
+            "sessions, not just the current one."
+        ),
     )
     p.add_argument(
         "--new",
         action="store_true",
-        help="Archive the current session (if it has messages) and start a new one before opening the chat.",
+        help=(
+            "Archive the current agent's session (if it has messages) and "
+            "start a new one for that agent before opening the chat. Other "
+            "agents' sessions are untouched."
+        ),
     )
     p.add_argument(
         "--debug",
@@ -397,22 +415,39 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    if args.new:
-        session, archived = archive_and_new_session(keep_system_prompt=True)
-        if archived:
-            eprint(f"[oc-interactive-chat] archived session → {archived}")
-        eprint(f"[oc-interactive-chat] new session {session.user_id}")
-
-    if args.init:
-        clear_cached_settings()
-        eprint("[oc-interactive-chat] cleared cached settings")
-
+    # Config must load before --new/--init can act: --init needs the full
+    # agent list, --new needs cfg.resolve_agent to pick which agent's
+    # session to touch.
     config_path = resolve_config_path(args)
     try:
         cfg = load_config(config_path)
     except (FileNotFoundError, ValueError) as e:
         eprint(f"error: {e}")
         return 1
+
+    if args.init:
+        archived = reset_all_agents(list(cfg.agents))
+        for agent_name, archive_path in archived.items():
+            if archive_path:
+                eprint(f"[oc-interactive-chat] archived {agent_name} session → {archive_path}")
+        eprint("[oc-interactive-chat] cleared sessions for all agents")
+        default_agent = cfg.default_agent
+        session = load_session(default_agent)
+        session.last_openclaw_config = str(config_path)
+        save_session(session, default_agent)
+        save_active_agent(default_agent)
+
+    if args.new:
+        try:
+            new_agent = cfg.resolve_agent(args.agent or load_active_agent())
+        except ValueError as e:
+            eprint(f"error: {e}")
+            return 1
+        session, archived = archive_and_new_session(new_agent, keep_system_prompt=True)
+        if archived:
+            eprint(f"[oc-interactive-chat] archived session → {archived}")
+        eprint(f"[oc-interactive-chat] new session {session.user_id} (agent {new_agent})")
+        save_active_agent(new_agent)
 
     try:
         ensure_ssh_tunnel(cfg, debug=args.debug)
@@ -421,16 +456,18 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        # Fall back to the agent the session was last talking to (set by
-        # /agent or a previous --agent) so restoring a session on restart
-        # doesn't silently snap back to the config's default agent.
-        agent = cfg.resolve_agent(args.agent or load_session().last_agent)
+        # Fall back to the agent the last turn (anywhere) was talking to, so
+        # restoring on restart doesn't silently snap back to the config's
+        # default agent.
+        agent = cfg.resolve_agent(args.agent or load_active_agent())
     except ValueError as e:
         eprint(f"error: {e}")
         return 1
+    save_active_agent(agent)
 
+    session = load_session(agent)
     try:
-        voice = resolve_voice(args, cfg)
+        voice = resolve_voice(args, cfg, session)
     except CliError as e:
         eprint(f"error: {e}")
         return 1

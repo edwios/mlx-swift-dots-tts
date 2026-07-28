@@ -118,11 +118,11 @@ Edit paths as needed. Example:
 - `filterPrompt` / `filterEnabled`: optional defaults for the filter's system prompt and on/off state. Used only until a session explicitly runs `/filter <description>` / `/filter on` / `/filter off`, at which point the session value wins (same precedence as `ttsVoiceDesign` vs. `/voice-design`). `--init` clears the session override and reverts to these config defaults. Run `/save-config` (below) to make a session's current filter settings — or agent/language/voice-design — the new config default.
 - `ssh` block: optional. When present, oc-interactive automatically establishes and repairs a local SSH port-forward tunnel on every invocation — see [SSH tunnel management](#ssh-tunnel-management).
 
-**CLI options override config.** Values in `oc-interactive.json` are defaults. Flags such as `--speaker`, `--instruct`, `--voice-design`, `-m` / `--model`, `-l` / `--language`, and `--agent` take precedence for that turn. Successful turns then cache the effective settings in `session.json`, so later turns can omit those flags until you override them again on the CLI.
+**CLI options override config.** Values in `oc-interactive.json` are defaults. Flags such as `--speaker`, `--instruct`, `--voice-design`, `-m` / `--model`, `-l` / `--language`, and `--agent` take precedence for that turn. Successful turns then cache the effective settings in that agent's own `agents/<agent>/session.json` (see [Sessions are per-agent](#sessions-are-per-agent)), so later turns can omit those flags until you override them again on the CLI.
 
 ### Saving settings back to the config file
 
-Everything above (`ttsVoiceDesign`, `ttsLanguage`, `defaultAgent`, `filterPrompt`/`filterEnabled`) is read from the config file as a *default*, then only ever cached per-session in `session.json` — the config file itself is never modified automatically. To make your current session's settings the new default for that config file (e.g. after tweaking `/voice-design` or `/filter` interactively and deciding you want to keep it), run:
+Everything above (`ttsVoiceDesign`, `ttsLanguage`, `defaultAgent`, `filterPrompt`/`filterEnabled`) is read from the config file as a *default*, then only ever cached per-agent in that agent's `session.json` — the config file itself is never modified automatically. To make your current agent's settings the new default for that config file (e.g. after tweaking `/voice-design` or `/filter` interactively and deciding you want to keep it), run:
 
 ```bash
 oc-interactive -t "/save-config"
@@ -141,27 +141,27 @@ This writes into whichever config file the session is using (the default path, o
 
 The daemon speaks back a summary of what was saved (e.g. "Config saved: agent victoria, language English, voice design, filter on."), or an error if the file couldn't be written (permissions, disk full, etc.) — the session itself is unaffected either way.
 
-To discard the session cache and reload from the config file (default `~/.config/oc-interactive/oc-interactive.json`, or `-c` if given):
+To reset **every** agent's session — conversation, system prompt, voice cache, filter, everything — and reload defaults from the config file (default `~/.config/oc-interactive/oc-interactive.json`, or `-c` if given):
 
 ```bash
 oc-interactive --init
-# or reset and speak in one turn:
+# or reset and speak in one turn (spoken with the config's defaultAgent):
 oc-interactive --init -t "Hello"
 ```
 
-Conversation history and the system prompt are kept; only cached voice/agent/config paths are cleared.
+Each agent listed in the config that has messages is archived first (see [Sessions are per-agent](#sessions-are-per-agent)), then replaced with a completely blank session. This is a harder reset than `--new` below — it clears *all* agents, not just the one you're currently talking to, and drops cached settings too instead of carrying them into the new session.
 
-To archive the current conversation and start a fresh session (keeps system prompt and voice settings):
+To archive the current agent's conversation and start a fresh one for that agent only (keeps system prompt and voice settings; other agents' sessions are untouched):
 
 ```bash
 oc-interactive --new
-# reset voice defaults and start a new session:
+# reset every agent's cache too, on top of starting fresh for this one:
 oc-interactive --new --init
 # archive, then speak the first turn of the new session:
 oc-interactive --new -t "Hello"
 ```
 
-Archives are written to `~/.config/oc-interactive/sessions/` when the current session has messages.
+Archives are written to `~/.config/oc-interactive/agents/<agent>/sessions/` when that agent's current session has messages.
 
 ```bash
 export ELLO_GATEWAY_TOKEN=your-token
@@ -255,7 +255,7 @@ oc-interactive -t "Yea, me too. What's up?"
 oc-interactive -t "Well, what do you expect living in the middle of the Pacific?"
 ```
 
-After the first turn, voice settings (`--speaker`, `--instruct`, `-r`/`--reftext`, `--voice-design`, `-m`, `-c`) are optional (cached in `~/.config/oc-interactive/session.json`).
+After the first turn, voice settings (`--speaker`, `--instruct`, `-r`/`--reftext`, `--voice-design`, `-m`, `-c`) are optional (cached per-agent in `~/.config/oc-interactive/agents/<agent>/session.json`).
 
 ### Text input
 
@@ -348,7 +348,15 @@ oc-interactive -t "What's in the news?" --speaker Ryan --agent news
 
 Permitted agents: `main`, `news`, `eileen` (from config). Default: `main` → `openclaw/main`.
 
-Once a turn switches agents (via `--agent` or `/agent <name>`), that choice is cached as `lastAgent` in `session.json`. Restarting `oc-interactive` / `oc-interactive-chat` (e.g. via `run-chat`) without `--agent` resumes that cached agent instead of falling back to the config's `defaultAgent` — so a restored session keeps talking to the same agent it was using before. Pass `--agent` explicitly to override it, or `--init` to clear the cache back to the config default.
+### Sessions are per-agent
+
+Each agent has its own independent session — its own conversation history, system prompt, cached voice settings, filter state, and cached config path — stored at `~/.config/oc-interactive/agents/<agent>/session.json`. Switching agents (via `--agent` or, in the chat UI, `/agent <name>`) switches to *that agent's own previous session*, picking up right where you last left off with it, rather than continuing the session you were just in under a different label.
+
+A small pointer file, `~/.config/oc-interactive/active_agent.json`, records which agent was last talked to (by any invocation — CLI or chat UI). At launch, if `--agent` isn't given, the session is restored from this active agent's own session rather than falling back to the config's `defaultAgent` — so restarting `oc-interactive` / `oc-interactive-chat` (e.g. via `run-chat`) resumes the same agent and the same conversation you were last using. Every turn (including slash commands) updates this pointer to whichever agent it just talked to.
+
+`--new` archives and resets only the current agent's session — other agents' sessions and the active-agent pointer for them are untouched. `--init` is a full reset: it archives and blanks out *every* agent's session and clears the active-agent pointer, so the next launch falls back to the config's `defaultAgent`. See [Saving settings back to the config file](#saving-settings-back-to-the-config-file) above for the exact `--new` / `--init` semantics.
+
+If you're upgrading from a version of oc-interactive that used a single flat `session.json` for all agents, that file is migrated automatically the first time any command runs: its conversation is moved into `agents/<lastAgent-or-main>/session.json`, that agent becomes the active agent, and the old file is renamed to `session.json.migrated`.
 
 ### Slash commands
 
@@ -396,8 +404,8 @@ oc-interactive -t "/history" > conversation.json
 | `-q` / `--quiet` | Do not print the text sent to TTS (full TTS text is printed to stdout by default) |
 | `--agent` | OpenClaw agent short name |
 | `-c` / `--config` | Path to `oc-interactive.json` (default: `~/.config/oc-interactive/oc-interactive.json`; cached after first turn) |
-| `--init` | Forget cached voice/agent/config settings and reload defaults from the config file (alone or with a turn) |
-| `--new` | Archive the current session under `sessions/` (if it has messages) and start a new one; keeps system prompt and voice cache (alone or with a turn) |
+| `--init` | Reset **every** agent's session (archiving each if it has messages) and reload defaults from the config file (alone or with a turn) |
+| `--new` | Archive the current agent's session under `agents/<agent>/sessions/` (if it has messages) and start a new one for that agent; keeps system prompt and voice cache; other agents untouched (alone or with a turn) |
 | `--timeout SECONDS` | Max seconds to wait for agent reply and TTS (default: no timeout) |
 | `--debug` | Log OpenClaw/TTS timing and cache status (`OC_INTERACTIVE_DEBUG=1`) |
 | `--ssh-tunnel-status` | Print JSON health of the config's `ssh` tunnel and exit (see [SSH tunnel management](#ssh-tunnel-management)) |
@@ -407,8 +415,8 @@ oc-interactive -t "/history" > conversation.json
 
 A [Textual](https://github.com/Textualize/textual)-based chat window that
 stays open for the whole conversation, instead of one process per turn. User
-messages are right-aligned, agent replies are left-aligned, and existing
-`session.json` history is rendered on startup.
+messages are right-aligned, agent replies are left-aligned, and the current
+agent's existing `session.json` history is rendered on startup.
 
 ```bash
 cd oc-interactive
@@ -429,10 +437,11 @@ playback still happens through the same background TTS daemon as the CLI; the
 chat window is a visual transcript layered on top, not a silent mode.
 
 These flags only seed the *first* turn. Voice settings resolved at startup are
-resynced from `session.json` after every turn (chat or slash command), so
-mid-session changes — e.g. `/voice-design …` — take effect immediately for
-the next reply and for a following bare `/voice-design`, instead of the app
-holding onto its startup snapshot for the rest of the session.
+resynced from the current agent's `session.json` after every turn (chat or
+slash command), so mid-session changes — e.g. `/voice-design …` — take effect
+immediately for the next reply and for a following bare `/voice-design`,
+instead of the app holding onto its startup snapshot for the rest of the
+session.
 
 Type a message and press Enter to send it. While a turn is in flight the
 input is disabled and the header subtitle shows `waiting for <agent>…`; the
@@ -447,10 +456,13 @@ Slash commands work the same as the CLI's (`/new`, `/clear`, `/clean all`,
   `~/.config/oc-interactive/exports/<timestamp>.json` instead of stdout (a
   full-screen app can't print to stdout mid-session), and show the saved path
   as a system message.
-- `/agent <name>` switches the agent used for subsequent turns without
-  restarting the app (validated against the same `agents` allowlist as
-  `--agent`). This command is local to the chat UI and isn't sent to the
-  daemon.
+- `/agent <name>` switches to that agent's own session for subsequent turns,
+  without restarting the app (validated against the same `agents` allowlist
+  as `--agent`). Since sessions are per-agent (see
+  [Sessions are per-agent](#sessions-are-per-agent)), this replaces the
+  visible chat log with that agent's own history and its own cached voice
+  settings — it isn't just relabeling the conversation you were just having.
+  This command is local to the chat UI and isn't sent to the daemon.
 - Bare `/voice-design` additionally pre-fills the chat input with
   `/voice-design <current description>` (or just `/voice-design ` if none is
   set), so you can tweak it without retyping it from scratch. The one-shot
@@ -471,8 +483,10 @@ Under `~/.config/oc-interactive/` (override with `OC_INTERACTIVE_STATE_DIR`):
 
 | File | Purpose |
 |------|---------|
-| `session.json` | Conversation history, system prompt, cached voice settings / model / config, filter on/off + description |
-| `sessions/` | Archived sessions from `--new` / `/new` (timestamped JSON copies) |
+| `agents/<agent>/session.json` | That agent's conversation history, system prompt, cached voice settings / model / config, filter on/off + description |
+| `agents/<agent>/sessions/` | That agent's archived sessions from `--new` / `/new` / `--init` (timestamped JSON copies) |
+| `active_agent.json` | Which agent's session is "current" — restored at launch when `--agent` is omitted; updated on every turn |
+| `session.json.migrated` | Pre-per-agent flat session file, renamed here after the one-time automatic migration (see [Sessions are per-agent](#sessions-are-per-agent)) |
 | `daemon.sock` | Unix socket IPC |
 | `daemon.pid` | Background daemon PID |
 | `daemon.log` | Background orchestration daemon logs |
@@ -488,7 +502,7 @@ The orchestration daemon shuts down after 30 minutes idle; the next invocation r
 
 | Symptom | What to check |
 |---------|----------------|
-| `Model type dots_tts not supported` | Stale `lastTtsModel` in `~/.config/oc-interactive/session.json` from the old dots-tts era. Pass `-m mlx-community/Qwen3-TTS-…`, or delete `lastTtsModel` from the session file. oc-interactive now ignores dots paths automatically after upgrade. |
+| `Model type dots_tts not supported` | Stale `lastTtsModel` in `~/.config/oc-interactive/agents/<agent>/session.json` from the old dots-tts era. Pass `-m mlx-community/Qwen3-TTS-…`, or delete `lastTtsModel` from that agent's session file. oc-interactive now ignores dots paths automatically after upgrade. |
 | Very slow every turn (`modelReloaded=True` always) | Ensure `tts-daemon.log` shows the daemon staying alive between turns. Restart with `pkill -f qwen_tts_daemon`. |
 | `peer closed connection` / no audio | Stale socket after a crashed daemon — remove `tts-daemon.sock` and `tts-daemon.pid`, or restart. Check `tts-daemon.log`. |
 | Model type / speaker errors | Match `-m` to the mode (CustomVoice vs Base vs VoiceDesign). List speakers for CustomVoice in the mlx-audio Qwen3-TTS docs. |

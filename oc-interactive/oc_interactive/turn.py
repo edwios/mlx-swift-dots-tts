@@ -14,8 +14,8 @@ from typing import Any
 
 from oc_interactive.config import OpenClawConfig
 from oc_interactive.io import CliError
-from oc_interactive.paths import default_config_path, debug_enabled
-from oc_interactive.session import Session, load_session
+from oc_interactive.paths import default_config_path, debug_enabled, normalize_agent_name
+from oc_interactive.session import Session, load_active_agent, load_session
 from oc_interactive.tts_defaults import (
     DEFAULT_LANGUAGE,
     DEFAULT_MODE,
@@ -167,8 +167,14 @@ def ensure_model_matches_mode(
     return model
 
 
-def resolve_voice(args: argparse.Namespace, cfg: OpenClawConfig) -> VoiceSettings:
-    session = load_session()
+def resolve_voice(args: argparse.Namespace, cfg: OpenClawConfig, session: Session) -> VoiceSettings:
+    """Resolve voice settings from CLI flags, ``session`` (the resolved
+    agent's own cache), and config, in that precedence order.
+
+    ``session`` must already be the session for the agent this turn is
+    talking to -- voice caching is per-agent, so the caller resolves the
+    agent and loads its session before calling this.
+    """
     cfg_voice_design = getattr(cfg, "tts_voice_design", None)
 
     # Mode: explicit CLI flags win; otherwise config VoiceDesign beats session
@@ -279,11 +285,21 @@ def resolve_voice(args: argparse.Namespace, cfg: OpenClawConfig) -> VoiceSetting
 
 
 def resolve_config_path(args: argparse.Namespace) -> Path:
-    session = load_session()
+    """Resolve the gateway config path: -c/--config wins, else whichever
+    agent's session has a cached path (the one named by --agent if given,
+    else the last active agent), else the built-in default.
+
+    This runs before a config is loaded (it's how a config gets loaded in
+    the first place), so the candidate agent name is only normalized, never
+    validated against a config's agent list.
+    """
     if args.openclaw_config:
         return Path(args.openclaw_config).expanduser().resolve()
-    if session.last_openclaw_config:
-        return Path(session.last_openclaw_config)
+    candidate = normalize_agent_name(getattr(args, "agent", None)) or load_active_agent()
+    if candidate:
+        session = load_session(candidate)
+        if session.last_openclaw_config:
+            return Path(session.last_openclaw_config)
     return default_config_path()
 
 

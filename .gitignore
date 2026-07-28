@@ -21,4 +21,5 @@ oc-interactive/**/tts-daemon.log
 oc-interactive/ello.conf
 oc-interactive/eileen.conf
 oc-interactive/victoria.conf
+oc-interactive/test.conf
 

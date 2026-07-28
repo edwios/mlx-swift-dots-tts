@@ -22,6 +22,7 @@ from oc_interactive.paths import (
     daemon_pid_path,
     daemon_sock_path,
     debug_enabled,
+    default_config_path,
     ensure_state_dir,
 )
 from oc_interactive.session import (
@@ -566,13 +567,22 @@ def _handle_slash(
         return RequestResult(tts_text=spoken)
 
     if slash.kind == SlashKind.SAVE_CONFIG:
-        # Snapshot the current effective settings into the active config
-        # file (whichever oc-interactive.json / *.conf this session is
-        # using), so they become that config's new defaults going forward
-        # -- an explicit, on-demand version of what /filter used to do
-        # automatically. Deliberately narrow in scope: agent, language,
-        # voice design (only if that's the mode in use), and the filter.
-        # Speaker/instruct/model/clone settings are left untouched for now.
+        # Snapshot the current effective settings into the *default* config
+        # file (~/.config/oc-interactive/oc-interactive.json, see
+        # paths.default_config_path) so they become that file's defaults
+        # going forward -- an explicit, on-demand version of what /filter
+        # used to do automatically. Deliberately narrow in scope: agent,
+        # language, voice design (only if that's the mode in use), and the
+        # filter. Speaker/instruct/model/clone settings are left untouched
+        # for now.
+        #
+        # This is always the default path, never whichever file was passed
+        # via -c/--config: that file (e.g. a named per-persona config like
+        # victoria.conf) is the user's own and oc-interactive must never
+        # write to it. If the default file doesn't exist yet, it's seeded
+        # from a copy of the currently active config (cfg.raw) so the
+        # result is an immediately usable standalone config.
+        save_path = default_config_path()
         effective_enabled = _effective_filter_enabled(cfg, session)
         effective_prompt = _effective_filter_prompt(cfg, session)
 
@@ -587,10 +597,11 @@ def _handle_slash(
             updates["ttsVoiceDesign"] = voice.voice_design
 
         try:
-            update_config_file(Path(openclaw_config), updates)
+            ensure_state_dir()
+            update_config_file(save_path, updates, seed=cfg.raw)
         except (OSError, ValueError) as e:
             spoken = agent_error_line(f"failed to save config, {e}")
-            eprint(f"[oc-interactive] /save-config failed for {openclaw_config}: {e}")
+            eprint(f"[oc-interactive] /save-config failed for {save_path}: {e}")
             _cache_tts_paths(
                 session,
                 openclaw_config=openclaw_config,
@@ -612,8 +623,8 @@ def _handle_slash(
         if saved_voice_design:
             parts.append("voice design")
         parts.append(f"filter {'on' if effective_enabled else 'off'}")
-        spoken = f"Config saved: {', '.join(parts)}."
-        eprint(f"[oc-interactive] config saved to {openclaw_config}: {updates!r}")
+        spoken = f"Config saved to {save_path}: {', '.join(parts)}."
+        eprint(f"[oc-interactive] config saved to {save_path}: {updates!r}")
         _cache_tts_paths(
             session,
             openclaw_config=openclaw_config,

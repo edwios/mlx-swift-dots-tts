@@ -195,18 +195,40 @@ def load_config(path: Path) -> OpenClawConfig:
     )
 
 
-def update_config_file(path: Path, updates: dict[str, Any]) -> None:
+def update_config_file(
+    path: Path,
+    updates: dict[str, Any],
+    *,
+    seed: dict[str, Any] | None = None,
+) -> None:
     """Merge ``updates`` into the on-disk JSON config, preserving every other key.
 
-    Used by the `/filter` slash command (see daemon.py) so `filterEnabled` /
-    `filterPrompt` changes become this config file's new default going
-    forward -- not just a per-session override in session.json. Writes
-    atomically (temp file + rename), same pattern as session.py.
+    Used by `/save-config` (see daemon.py) so `defaultAgent` / `ttsLanguage` /
+    `ttsVoiceDesign` / `filterEnabled` / `filterPrompt` changes become this
+    config file's new defaults going forward -- not just a per-session
+    override in session.json. Writes atomically (temp file + rename), same
+    pattern as session.py.
+
+    ``path`` is always the *default* config path (``~/.config/oc-interactive/
+    oc-interactive.json``, see ``paths.default_config_path``) -- never
+    whichever file was passed via `-c`/`--config`, which oc-interactive must
+    never write to. If that default file doesn't exist yet, it's created
+    from a copy of ``seed`` (the currently active config's raw contents)
+    with ``updates`` applied on top, so the result is an immediately usable
+    standalone config rather than a partial one missing required keys like
+    `openclawBaseURL`/`openclawToken`. Without a ``seed``, a missing file is
+    an error.
     """
-    with path.open(encoding="utf-8") as f:
-        raw: dict[str, Any] = json.load(f)
+    if path.exists():
+        with path.open(encoding="utf-8") as f:
+            raw: dict[str, Any] = json.load(f)
+    elif seed is not None:
+        raw = dict(seed)
+    else:
+        raise FileNotFoundError(f"oc-interactive config not found: {path}")
     raw.update(updates)
 
+    path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(raw, indent=2, ensure_ascii=False) + "\n"
     tmp = path.with_name(path.name + ".tmp")
     with tmp.open("w", encoding="utf-8") as f:

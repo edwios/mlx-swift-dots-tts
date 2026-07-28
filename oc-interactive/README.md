@@ -122,13 +122,15 @@ Edit paths as needed. Example:
 
 ### Saving settings back to the config file
 
-Everything above (`ttsVoiceDesign`, `ttsLanguage`, `defaultAgent`, `filterPrompt`/`filterEnabled`) is read from the config file as a *default*, then only ever cached per-agent in that agent's `session.json` — the config file itself is never modified automatically. To make your current agent's settings the new default for that config file (e.g. after tweaking `/voice-design` or `/filter` interactively and deciding you want to keep it), run:
+Everything above (`ttsVoiceDesign`, `ttsLanguage`, `defaultAgent`, `filterPrompt`/`filterEnabled`) is read from the config file as a *default*, then only ever cached per-agent in that agent's `session.json` — the config file itself is never modified automatically. To make your current agent's settings the new default, run:
 
 ```bash
 oc-interactive -t "/save-config"
 ```
 
-This writes into whichever config file the session is using (the default path, or whatever `-c`/`--config` points at) — merging in just these keys and leaving everything else (tokens, agents list, TTS speaker/instruct/model, ssh block, etc.) untouched:
+**This always writes to the *default* config path, `~/.config/oc-interactive/oc-interactive.json` (override with `OC_INTERACTIVE_STATE_DIR`) — never to whichever file was passed via `-c`/`--config`.** oc-interactive never modifies a `-c`/`--config` file (e.g. a named per-persona config like `eileen.conf`/`victoria.conf`); that file is yours to edit by hand. If you're running with `-c` day to day (as the `*_init.sh` launcher scripts do), `/save-config` still only affects `oc-interactive.json`, so re-running with `-c` again won't pick up what you just saved unless you also add it to that `-c` file yourself.
+
+If `oc-interactive.json` doesn't exist yet, `/save-config` creates it by copying the full contents of the config currently in use (so it's an immediately usable standalone config, not missing `openclawBaseURL`/`openclawToken`), then applies the updates below. If it already exists, only these keys are merged in — everything else in it is left untouched:
 
 | Key written | From |
 |-------------|------|
@@ -139,7 +141,7 @@ This writes into whichever config file the session is using (the default path, o
 
 `ttsSpeaker` / `ttsInstruct` / `ttsModel` / clone (`refaudio`/`reftext`) settings are **not** currently written by `/save-config` — if you're using CustomVoice or Clone mode day to day, those still need to be edited into the config file by hand (or passed as CLI flags each time).
 
-The daemon speaks back a summary of what was saved (e.g. "Config saved: agent victoria, language English, voice design, filter on."), or an error if the file couldn't be written (permissions, disk full, etc.) — the session itself is unaffected either way.
+The daemon speaks back a summary of what was saved, including the path it wrote to (e.g. "Config saved to /Users/you/.config/oc-interactive/oc-interactive.json: agent victoria, language English, voice design, filter on."), or an error if the file couldn't be written (permissions, disk full, etc.) — the session itself is unaffected either way.
 
 To reset **every** agent's session — conversation, system prompt, voice cache, filter, everything — and reload defaults from the config file (default `~/.config/oc-interactive/oc-interactive.json`, or `-c` if given):
 
@@ -372,7 +374,7 @@ None of these produce spoken audio — every slash-command confirmation below is
 | `/filter on` / `/filter off` | Enable/disable routing spoken text through the local filter LLM before TTS (see [Text filter](#text-filter-local-llm)) |
 | `/filter <description>` | Set the filter LLM's system prompt; independent of on/off |
 | `/filter` (bare) | Report current on/off state + description |
-| `/save-config` (alias `/save config`) | Write the current agent, language, voice design (if active), and filter settings into the active config file as its new defaults — see [Saving settings back to the config file](#saving-settings-back-to-the-config-file) |
+| `/save-config` (alias `/save config`) | Write the current agent, language, voice design (if active), and filter settings into the *default* `oc-interactive.json` as its new defaults — never into a `-c`/`--config` file — see [Saving settings back to the config file](#saving-settings-back-to-the-config-file) |
 | `/help` | Command summary (text only, not spoken) |
 | `/status` | Session summary (text only, not spoken) |
 | `/dump`, `/dump all`, `/history` | JSON conversation history on **stdout** (no audio) |
@@ -385,7 +387,7 @@ oc-interactive -t "/voice-design"        # cite the current description
 oc-interactive -t "/voice-design reset"  # back to the config's ttsVoiceDesign (or CustomVoice)
 oc-interactive -t "/filter Rewrite calmly and briefly." --speaker Ryan
 oc-interactive -t "/filter on"
-oc-interactive -t "/save-config"  # bake the above into the active config file
+oc-interactive -t "/save-config"  # bake the above into oc-interactive.json (never the -c file)
 oc-interactive -t "/history" > conversation.json
 ```
 
@@ -513,7 +515,14 @@ The orchestration daemon shuts down after 30 minutes idle; the next invocation r
 After code changes, restart the orchestration daemon so it picks up the installed package:
 
 ```bash
+./restart-daemon.sh
+# or directly:
 pkill -f "oc_interactive --daemon"
+```
+
+If the change also touches TTS (`tts.py`, `qwen_tts_daemon.py`), restart that daemon too:
+
+```bash
 pkill -f "oc_interactive.qwen_tts_daemon"
 ```
 

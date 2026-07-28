@@ -275,7 +275,7 @@ Before any text is handed to the speech synthesizer, oc-interactive checks the *
 - If that line is enclosed in square brackets (e.g. `[laughs]`, `[whispers something]`), only that line — with the `[` and `]` stripped — is actually synthesized into audio.
 - Otherwise, the **full text** is synthesized unchanged.
 
-This only affects what gets spoken out loud. Everywhere else — stdout, the chat UI transcript, `-v`/`--verbose`, and `session.json` history — always shows/stores the **full, unmodified** text, regardless of whether a bracketed first line caused only part of it to be spoken. It applies to every kind of spoken text: agent replies, slash-command confirmations (`/new`, `/system prompt`, `/voice-design`, `/filter`, `/save-config`, `/help`, `/status`), and agent-error lines.
+This only affects what gets spoken out loud. Everywhere else — stdout, the chat UI transcript, `-v`/`--verbose`, and `session.json` history — always shows/stores the **full, unmodified** text, regardless of whether a bracketed first line caused only part of it to be spoken. It applies to spoken text from real chat turns: agent replies and agent-error lines. Slash-command confirmations (`/new`, `/system prompt`, `/voice-design`, `/filter`, `/save-config`, `/help`, `/status`) are never sent to the TTS engine at all — they're always displayed as text (stdout / chat UI transcript) but never synthesized into audio.
 
 ### Text filter (local LLM)
 
@@ -299,7 +299,7 @@ oc-interactive -t "/filter off"
 
 Notes:
 
-- Only real agent replies are ever routed through the filter — slash-command confirmations and agent-error lines are always spoken unfiltered.
+- Only real agent replies are ever routed through the filter — agent-error lines are always spoken unfiltered, and slash-command confirmations aren't spoken (as audio) at all, so filtering never applies to them.
 - The filter is display-transparent, same as the bracket rule: stdout, the chat transcript, and `session.json` history always show the agent's original, unfiltered reply. Only the audio actually synthesized reflects the filtered text.
 - If the filter LLM is unreachable, times out, or returns a malformed reply, oc-interactive logs the error (`daemon.log`) and falls back to speaking the original unfiltered text for that turn — a filter-server hiccup never blocks speech.
 - On/off state and the description persist in `session.json` like the system prompt (survive `/new`); only an explicit `/filter on` / `/filter off` / `/filter <description>` changes them for this session. `--init` clears the session override and reverts to the config's `filterEnabled`/`filterPrompt` defaults. None of this touches the config file itself — run `/save-config` (see [Saving settings back to the config file](#saving-settings-back-to-the-config-file)) if you want the current filter settings to become that config's new default.
@@ -360,6 +360,8 @@ If you're upgrading from a version of oc-interactive that used a single flat `se
 
 ### Slash commands
 
+None of these produce spoken audio — every slash-command confirmation below is displayed as text only (stdout / chat UI transcript). Only real agent chat replies (and agent-error lines from a chat turn) are ever sent to the TTS engine.
+
 | Command | Effect |
 |---------|--------|
 | `/new`, `/clear`, `/clean all` | New session (archives current if it has messages; clears history; keeps system prompt) |
@@ -371,8 +373,8 @@ If you're upgrading from a version of oc-interactive that used a single flat `se
 | `/filter <description>` | Set the filter LLM's system prompt; independent of on/off |
 | `/filter` (bare) | Report current on/off state + description |
 | `/save-config` (alias `/save config`) | Write the current agent, language, voice design (if active), and filter settings into the active config file as its new defaults — see [Saving settings back to the config file](#saving-settings-back-to-the-config-file) |
-| `/help` | Spoken command summary |
-| `/status` | Spoken session summary |
+| `/help` | Command summary (text only, not spoken) |
+| `/status` | Session summary (text only, not spoken) |
 | `/dump`, `/dump all`, `/history` | JSON conversation history on **stdout** (no audio) |
 
 ```bash

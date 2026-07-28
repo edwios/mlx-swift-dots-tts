@@ -357,7 +357,15 @@ def _handle_slash(
 
     if slash.kind == SlashKind.UNKNOWN:
         spoken = agent_error_line(f"unknown command {slash.raw_verb!r}")
-        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn, is_error=True)
+        _speak(
+            spoken,
+            voice=voice,
+            debug=debug,
+            quiet=quiet,
+            conn=conn,
+            is_error=True,
+            synthesize=False,
+        )
         raise ValueError(spoken)
 
     if slash.kind == SlashKind.NEW_SESSION:
@@ -372,7 +380,7 @@ def _handle_slash(
         if archived:
             eprint(f"[oc-interactive] archived session → {archived}")
         eprint(f"[oc-interactive] new session {session.user_id}")
-        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn, synthesize=False)
         return RequestResult(tts_text=spoken)
 
     if slash.kind == SlashKind.SET_SYSTEM_PROMPT:
@@ -387,7 +395,7 @@ def _handle_slash(
         eprint(
             f"[oc-interactive] system prompt {'set' if slash.value else 'cleared'}"
         )
-        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn, synthesize=False)
         return RequestResult(tts_text=spoken)
 
     if slash.kind == SlashKind.SET_VOICE_DESIGN:
@@ -413,7 +421,7 @@ def _handle_slash(
                 voice=voice,
                 agent=agent,
             )
-            _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
+            _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn, synthesize=False)
             return RequestResult(tts_text=spoken, voice_design_prefill=prefill)
 
         if lower in ("reset", "default"):
@@ -461,7 +469,7 @@ def _handle_slash(
                 voice=new_voice,
                 agent=agent,
             )
-            _speak(spoken, voice=new_voice, debug=debug, quiet=quiet, conn=conn)
+            _speak(spoken, voice=new_voice, debug=debug, quiet=quiet, conn=conn, synthesize=False)
             return RequestResult(tts_text=spoken)
 
         # Normal set: switch to VoiceDesign mode with this description.
@@ -486,7 +494,7 @@ def _handle_slash(
             voice=new_voice,
             agent=agent,
         )
-        _speak(spoken, voice=new_voice, debug=debug, quiet=quiet, conn=conn)
+        _speak(spoken, voice=new_voice, debug=debug, quiet=quiet, conn=conn, synthesize=False)
         return RequestResult(tts_text=spoken)
 
     if slash.kind == SlashKind.SET_FILTER:
@@ -521,7 +529,7 @@ def _handle_slash(
                 voice=voice,
                 agent=agent,
             )
-            _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
+            _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn, synthesize=False)
             return RequestResult(tts_text=spoken, filter_prefill=prefill)
 
         if lower in ("on", "off"):
@@ -536,7 +544,7 @@ def _handle_slash(
                 voice=voice,
                 agent=agent,
             )
-            _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
+            _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn, synthesize=False)
             return RequestResult(tts_text=spoken)
 
         # Anything else: set the description. On/off state is independent
@@ -554,7 +562,7 @@ def _handle_slash(
             voice=voice,
             agent=agent,
         )
-        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn, synthesize=False)
         return RequestResult(tts_text=spoken)
 
     if slash.kind == SlashKind.SAVE_CONFIG:
@@ -589,7 +597,15 @@ def _handle_slash(
                 voice=voice,
                 agent=agent,
             )
-            _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn, is_error=True)
+            _speak(
+                spoken,
+                voice=voice,
+                debug=debug,
+                quiet=quiet,
+                conn=conn,
+                is_error=True,
+                synthesize=False,
+            )
             return RequestResult(error=spoken)
 
         parts = [f"agent {agent}", f"language {voice.language}"]
@@ -604,7 +620,7 @@ def _handle_slash(
             voice=voice,
             agent=agent,
         )
-        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn, synthesize=False)
         return RequestResult(tts_text=spoken)
 
     if slash.kind == SlashKind.HELP:
@@ -615,7 +631,7 @@ def _handle_slash(
             agent=agent,
         )
         spoken = confirmation_text(slash, extra_commands=extra_help_commands)
-        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn, synthesize=False)
         return RequestResult(tts_text=spoken)
 
     if slash.kind == SlashKind.STATUS:
@@ -635,7 +651,7 @@ def _handle_slash(
             voice=voice,
             agent=agent,
         )
-        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn)
+        _speak(spoken, voice=voice, debug=debug, quiet=quiet, conn=conn, synthesize=False)
         return RequestResult(tts_text=spoken)
 
     raise ValueError(f"unhandled slash command: {slash.kind}")
@@ -723,6 +739,7 @@ def _speak(
     conn: socket.socket | None = None,
     is_error: bool = False,
     filter_ctx: FilterContext | None = None,
+    synthesize: bool = True,
 ) -> None:
     _ = quiet  # CLI enforces quiet when printing the streamed ttsText event
     # The full text is always displayed/printed/stored; only the audio
@@ -730,6 +747,12 @@ def _speak(
     # filter). filter_ctx is only passed for real agent replies — slash
     # command confirmations (filter_ctx=None) are never routed through it.
     _emit_tts_text(conn, text, is_error=is_error)
+    # Slash-command confirmations (synthesize=False) are shown in the UI via
+    # the ttsText event above but never handed to the TTS engine: only real
+    # LLM/agent replies (_handle_chat, synthesize defaults to True) are
+    # actually spoken.
+    if not synthesize:
+        return
     spoken_text = select_tts_text(text)
     if filter_ctx is not None and filter_ctx.enabled and not is_error:
         try:

@@ -489,7 +489,7 @@ Under `~/.config/oc-interactive/` (override with `OC_INTERACTIVE_STATE_DIR`):
 |------|---------|
 | `agents/<agent>/session.json` | That agent's conversation history, system prompt, cached voice settings / model / config, filter on/off + description |
 | `agents/<agent>/sessions/` | That agent's archived sessions from `--new` / `/new` / `--init` (timestamped JSON copies) |
-| `active_agent.json` | Which agent's session is "current" — restored at launch when `--agent` is omitted; updated on every turn |
+| `active_agent.json` | Which agent's session is "current" — restored at launch when `--agent` is omitted; updated on every turn. This pointer is shared across every `-c`/`--config` file; if it names an agent that isn't in the current config's `agents` list (e.g. you switched to a config with a different roster), oc-interactive silently falls back to that config's `defaultAgent` instead of erroring — an explicit `--agent` still fails loudly if invalid. |
 | `session.json.migrated` | Pre-per-agent flat session file, renamed here after the one-time automatic migration (see [Sessions are per-agent](#sessions-are-per-agent)) |
 | `daemon.sock` | Unix socket IPC |
 | `daemon.pid` | Background daemon PID |
@@ -532,7 +532,7 @@ All error messages are written to **stderr** and the process exits with a non-ze
 
 Agent failures are also spoken as: `Something wrong with the agent, <reason>` (that text is printed to stderr, not stdout).
 
-Unknown slash commands and invalid `--agent` values exit with an error on stderr.
+Unknown slash commands and an explicitly invalid `--agent` value exit with an error on stderr. A stale *cached* active-agent (not passed via `--agent`) that's invalid for the current config falls back to that config's `defaultAgent` instead — see `active_agent.json` in [State files](#state-files).
 
 **stdout** is used for:
 

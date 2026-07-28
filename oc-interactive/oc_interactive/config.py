@@ -53,6 +53,25 @@ class OpenClawConfig:
     def openclaw_model(self, agent: str) -> str:
         return f"openclaw/{agent}"
 
+    def resolve_agent_or_default(self, explicit: str | None, cached: str | None) -> str:
+        """Resolve the agent to use, the way every entry point should: an
+        explicit ``--agent`` must be valid for *this* config -- an invalid
+        explicit name is a real error, surfaced immediately. ``cached`` (the
+        last-active-agent pointer in ``active_agent.json``) is shared across
+        every ``-c``/``--config`` file, so it's best-effort only: if it
+        doesn't belong to this config's ``agents`` list (e.g. it was set
+        while a different config was active), silently fall back to this
+        config's own ``defaultAgent`` instead of raising.
+        """
+        if explicit:
+            return self.resolve_agent(explicit)
+        if cached:
+            try:
+                return self.resolve_agent(cached)
+            except ValueError:
+                pass
+        return self.resolve_agent(None)
+
 
 def _resolve_token(value: str) -> str:
     value = value.strip()

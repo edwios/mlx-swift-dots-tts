@@ -303,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.new:
         try:
-            new_agent = cfg.resolve_agent(args.agent or load_active_agent())
+            new_agent = cfg.resolve_agent_or_default(args.agent, load_active_agent())
         except ValueError as e:
             return _report_error(str(e))
         session, archived = archive_and_new_session(new_agent, keep_system_prompt=True)
@@ -336,7 +336,7 @@ def main(argv: list[str] | None = None) -> int:
         slash = parse_slash_command(text)
         if slash and is_dump_command(slash):
             try:
-                dump_agent = cfg.resolve_agent(args.agent or load_active_agent())
+                dump_agent = cfg.resolve_agent_or_default(args.agent, load_active_agent())
             except ValueError as e:
                 return _report_error(str(e))
             return _handle_dump(dump_agent)
@@ -350,7 +350,7 @@ def main(argv: list[str] | None = None) -> int:
         # Fall back to the agent the last turn (anywhere) was talking to, so
         # restoring on restart doesn't silently snap back to the config's
         # default agent.
-        agent = cfg.resolve_agent(args.agent or load_active_agent())
+        agent = cfg.resolve_agent_or_default(args.agent, load_active_agent())
     except ValueError as e:
         return _report_error(str(e))
     save_active_agent(agent)

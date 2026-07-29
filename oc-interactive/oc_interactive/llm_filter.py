@@ -45,7 +45,7 @@ def filter_text(
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": text})
 
-    body = {"model": model, "messages": messages}
+    body = {"model": model, "messages": messages, "context_length": 8000}
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         url,

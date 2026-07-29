@@ -394,7 +394,10 @@ token, no conversation/user-id state, no retry/backoff needed since a
 failure just falls back to unfiltered speech). On/off state and the prompt
 persist per-agent in `session.json` exactly like the system prompt, with the
 config-file value as the fallback default when a session hasn't explicitly
-toggled it.
+toggled it. The request body also pins `"context_length": 8000` (an
+[LM Studio REST API](https://lmstudio.ai/docs/developer/rest/chat) extension)
+so the filter model's context window is sized consistently regardless of the
+server's own default.
 
 ## Experimental / not-yet-integrated
 

@@ -281,7 +281,7 @@ This only affects what gets spoken out loud. Everywhere else — stdout, the cha
 
 ### Text filter (local LLM)
 
-Optionally, whatever text would be spoken (i.e. after the bracket-selection rule above) can be routed through a separate local LLM first, and its reply is what actually gets synthesized — for tone rewriting, redaction, simplification, etc. This uses an OpenAI-compatible `/v1/chat/completions` endpoint such as [LM Studio](https://lmstudio.ai/docs/developer/rest); the target server/model are set via `filterBaseURL` / `filterModel` in the config (see [Configuration](#configuration)).
+Optionally, whatever text would be spoken (i.e. after the bracket-selection rule above) can be routed through a separate local LLM first, and its reply is what actually gets synthesized — for tone rewriting, redaction, simplification, etc. This uses an OpenAI-compatible `/v1/chat/completions` endpoint such as [LM Studio](https://lmstudio.ai/docs/developer/rest/chat); the target server/model are set via `filterBaseURL` / `filterModel` in the config (see [Configuration](#configuration)). The request body sends `"context_length": 8000`, an LM Studio REST extension that pins the filter model's context window.
 
 Controlled with the `/filter` slash command:
 

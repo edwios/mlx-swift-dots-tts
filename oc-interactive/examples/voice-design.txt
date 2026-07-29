@@ -1,0 +1,13 @@
+gender: Female.
+pitch: Mid-range female pitch, rising sharply with frustration.
+speed: Starts measured, then accelerates rapidly during emotional outburst.
+volume: Begins conversational, escalates quickly to loud and forceful.
+age: Young adult to middle-aged.
+clarity: High clarity and distinct articulation throughout.
+fluency: Highly fluent with no significant pauses or fillers.
+accent: General American English.
+texture: Bright and clear vocal quality.
+emotion: Shifts abruptly from neutral acceptance to intense resentment and anger.
+tone: Initially accepting, becomes sharply accusatory and confrontational.
+personality: Assertive and emotionally expressive when provoked.
+
